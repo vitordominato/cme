@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Navegação Pós-Alta · CHN</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-view">
+  <div class="login-card">
+    <h1>Navegação Pós-Alta</h1>
+    <p class="login-sub">Complexo Hospitalar de Niterói · Centro Médico</p>
+    <div class="mrow"><label>E-mail</label><input type="email" id="login-email" autocomplete="username"></div>
+    <div class="mrow"><label>Senha</label><input type="password" id="login-senha" autocomplete="current-password"></div>
+    <button class="btn pri wide" id="btn-login">Entrar</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- ============ AGUARDANDO APROVAÇÃO ============ -->
+<div id="pending-view" style="display:none">
+  <div class="login-card">
+    <h1>Acesso pendente</h1>
+    <p class="login-sub">Sua conta foi criada, mas ainda não tem um perfil atribuído.<br>
+    Peça ao administrador para liberar seu acesso na aba <b>Equipe</b>.</p>
+    <button class="btn wide" id="btn-sair-pend">Sair</button>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app-view" style="display:none">
+<header>
+  <div>
+    <h1>Navegação Pós-Alta &middot; Redução de Reinternação</h1>
+    <p>Complexo Hospitalar de Niterói &middot; Centro Médico de Excelência</p>
+  </div>
+  <div class="userbox">
+    <span id="user-chip" class="user-chip"></span>
+    <button class="btn" id="btn-sair">Sair</button>
+  </div>
+</header>
+<div class="wrap">
+
+<div class="tabs" id="tabs">
+  <div class="tab" data-p="dash" data-roles="admin">Dashboard</div>
+  <div class="tab" data-p="altas" data-roles="admin,navegador">Altas do Dia</div>
+  <div class="tab" data-p="ps" data-roles="admin,navegador">Altas PS</div>
+  <div class="tab" data-p="controle" data-roles="admin,navegador">Acompanhamento</div>
+  <div class="tab" data-p="cobranca" data-roles="admin,navegador,recepcao">Cobrança · Recepção</div>
+  <div class="tab" data-p="equipe" data-roles="admin">Equipe</div>
+</div>
+
+<!-- ============ DASHBOARD (admin) ============ -->
+<div class="panel" id="p-dash">
+  <h2 class="sec">Pacientes por categoria</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="n" id="d-tot">0</div><div class="l">Ativos</div><div class="s">base atual</div></div>
+    <div class="kpi a"><div class="n" id="d-a">0</div><div class="l">Trilha A · Evitável</div><div class="s">revisão 7d</div></div>
+    <div class="kpi b"><div class="n" id="d-b">0</div><div class="l">Trilha B · Paliativo</div><div class="s">plano de cuidado</div></div>
+    <div class="kpi c"><div class="n" id="d-c">0</div><div class="l">Trilha C · Médio</div><div class="s">revisão 14d</div></div>
+    <div class="kpi"><div class="n" id="d-baixo">0</div><div class="l">Baixo risco</div><div class="s">sem navegação ativa</div></div>
+    <div class="kpi ns"><div class="n" id="d-ns">0</div><div class="l">Alerta no-show</div><div class="s">imobilidade</div></div>
+  </div>
+
+  <h2 class="sec">Performance por navegador</h2>
+  <div class="mini" style="margin-bottom:16px">
+    <div style="overflow-x:auto"><table id="perf-tb" style="box-shadow:none"><thead><tr>
+      <th style="cursor:default">Navegador</th>
+      <th style="cursor:default;text-align:center">Atribuídos</th>
+      <th style="cursor:default;text-align:center">Contatados</th>
+      <th style="cursor:default;text-align:center">Agendados</th>
+      <th style="cursor:default;text-align:center">Compareceu</th>
+      <th style="cursor:default;text-align:center">No-show</th>
+      <th style="cursor:default;text-align:center">% contato</th>
+      <th style="cursor:default;text-align:center">% agendamento</th>
+      <th style="cursor:default;text-align:center">% comparecimento</th>
+    </tr></thead><tbody id="perf-bd"></tbody></table></div>
+    <div class="note" style="margin:12px 0 0"><b>Leitura.</b> % contato = contatados / atribuídos · % agendamento = agendados / contatados · % comparecimento = compareceu / (compareceu + no-show). A linha "Sem navegador" reúne pacientes ainda não distribuídos.</div>
+  </div>
+
+  <h2 class="sec">Funil de navegação</h2>
+  <div class="funil" id="funil"></div>
+
+  <div class="split">
+    <div class="mini"><h3>Motivos de não agendamento / não contato</h3><div id="ct-tipo"></div></div>
+    <div class="mini"><h3>Comparecimento às consultas</h3><div id="ct-desf"></div></div>
+  </div>
+  <div class="note" style="margin-top:16px"><b>Leitura do funil.</b> A conversão entre etapas é o indicador-processo; o desfecho final (realizada vs. no-show) é o indicador-resultado que antecede a reinternação evitável de 30 dias.</div>
+
+  <h2 class="sec">Desfechos por segmento</h2>
+  <div class="bar">
+    <span class="sub" style="font-weight:600">Segmentar por:</span>
+    <span class="chip on" data-seg="conv">Operadora</span>
+    <span class="chip" data-seg="idade">Faixa etária</span>
+    <span class="chip" data-seg="sexo">Sexo</span>
+  </div>
+  <div class="mini" style="margin-bottom:16px">
+    <h3><span id="seg-title">Operadora</span> · Agendados / Compareceu / No-show</h3>
+    <div style="overflow-x:auto"><table id="seg-tb" style="box-shadow:none"><thead><tr>
+      <th style="cursor:default"><span id="seg-col">Operadora</span></th>
+      <th style="cursor:default;text-align:center">Agendados</th>
+      <th style="cursor:default;text-align:center">Compareceu</th>
+      <th style="cursor:default;text-align:center">No-show</th>
+      <th style="cursor:default;text-align:center">% comparec.</th>
+    </tr></thead><tbody id="seg-bd"></tbody></table></div>
+  </div>
+</div>
+
+<!-- ============ ALTAS DO DIA ============ -->
+<div class="panel" id="p-altas">
+  <div class="exp" style="align-items:center">
+    <button class="btn pri" onclick="document.getElementById('file-altas').click()">&#128194; Carregar altas hospitalares (.xlsx / .xls)</button>
+    <input type="file" id="file-altas" accept=".xls,.xlsx" style="display:none">
+    <button class="btn" onclick="document.getElementById('file-censo').click()">&#128194; Atualizar censo (export SoulMV .xls)</button>
+    <input type="file" id="file-censo" accept=".xls,.xlsx" style="display:none">
+    <span class="sub" id="altas-info"></span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="n" id="al-tot">0</div><div class="l">Altas elegíveis</div></div>
+    <div class="kpi alto"><div class="n" id="al-alto">0</div><div class="l">Alto risco</div><div class="s">ligar primeiro</div></div>
+    <div class="kpi medio"><div class="n" id="al-medio">0</div><div class="l">Médio risco</div></div>
+    <div class="kpi a"><div class="n" id="al-cruz">0</div><div class="l">Com score completo</div><div class="s">cruzou com o censo</div></div>
+    <div class="kpi c"><div class="n" id="al-atrib">0</div><div class="l">Com navegador</div><div class="s">distribuídos</div></div>
+  </div>
+
+  <h2 class="sec">Lista de altas</h2>
+  <div class="note"><b>Score parcial de alta.</b> Quando o paciente não cruza com o censo de internados, a priorização usa: DIH (&ge;15d +3 &middot; 8&ndash;14d +2 &middot; 4&ndash;7d +1), admissão via emergência (+2), idade &gt;50 (+2) e, quando o arquivo trouxer CID, o grupo diagnóstico de risco. Alto &ge;5 &middot; Médio 3&ndash;4. Exclusões automáticas na importação: berçário e day clinic (e, quando houver CID: Z38 recém-nascido saudável e O80 parto).</div>
+  <div class="bar">
+    <input id="q3" placeholder="Buscar paciente, unidade ou origem...">
+    <span class="chip on" data-t3="ALL">Todos</span>
+    <span class="chip" data-t3="ALTO">Alto</span>
+    <span class="chip" data-t3="MEDIO">Médio</span>
+    <span class="chip" data-t3="BAIXO">Baixo</span>
+    <span class="chip meus" data-meus3="1">Meus pacientes</span>
+  </div>
+  <div class="bar">
+    <select id="f-conv"><option value="">Operadora: todas</option></select>
+    <label class="sub">Idade</label>
+    <input type="number" id="f-idmin" placeholder="mín" min="0" max="120" style="width:80px;flex:none">
+    <input type="number" id="f-idmax" placeholder="máx" min="0" max="120" style="width:80px;flex:none">
+    <label class="sub">Alta de</label>
+    <input type="date" id="f-dtini" style="flex:none">
+    <label class="sub">até</label>
+    <input type="date" id="f-dtfim" style="flex:none">
+    <button class="btn" id="btn-limpar-altas">Limpar filtros</button>
+  </div>
+  <div class="distbar admin-only" id="distbar-altas" style="display:none">
+    <label class="sel-all"><input type="checkbox" id="sel-all-altas"> Selecionar todos os filtrados</label>
+    <span class="sub" id="sel-info-altas">0 selecionados</span>
+    <button class="btn pri" id="btn-dist-altas">&#9878; Distribuir selecionados entre os navegadores</button>
+  </div>
+  <div style="overflow-x:auto"><table id="tb3"><thead><tr>
+    <th class="admin-only chk-col"></th><th>Score</th><th>Origem do score</th><th>Atend.</th><th>Paciente</th><th>Idade</th><th>Sexo</th><th>DIH</th><th>Operadora</th><th>Origem</th><th>Unidade da alta</th><th>Data da alta</th><th>Navegador</th><th>Orientação</th><th>Ação</th>
+  </tr></thead><tbody id="bd3"></tbody></table></div>
+</div>
+
+<!-- ============ ALTAS PS ============ -->
+<div class="panel" id="p-ps">
+  <div class="exp" style="align-items:center">
+    <button class="btn pri" onclick="document.getElementById('file-ps').click()">&#128194; Carregar egressos do PS (export 6906 .xls)</button>
+    <input type="file" id="file-ps" accept=".xls,.xlsx" style="display:none">
+    <span class="sub" id="ps-info"></span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="n" id="ps-tot">0</div><div class="l">Egressos na base</div></div>
+    <div class="kpi alto"><div class="n" id="ps-sem">0</div><div class="l">Sem agendamento</div><div class="s">fila de trabalho</div></div>
+    <div class="kpi ok"><div class="n" id="ps-com">0</div><div class="l">Com agendamento futuro</div></div>
+    <div class="kpi ns"><div class="n" id="ps-int30">0</div><div class="l">Internado em 30 dias</div><div class="s">readmissão</div></div>
+  </div>
+  <div class="note"><b>Egressos do PS (relatório 6906).</b> Pacientes que saíram do pronto-socorro com indicação de acompanhamento ambulatorial. A fila prioritária são os <b>sem agendamento futuro</b> — a navegação fecha essa lacuna marcando o retorno na especialidade recomendada. "Internado 30 dias" é o indicador de readmissão desta população. Esta fila é separada do funil de internação do Dashboard.</div>
+  <div class="bar">
+    <input id="q4" placeholder="Buscar paciente, especialidade, convênio ou avaliador...">
+    <span class="chip on" data-t4="ALL">Todos</span>
+    <span class="chip" data-t4="SEM">Sem agendamento</span>
+    <span class="chip" data-t4="COM">Com agendamento</span>
+    <span class="chip" data-t4="INT">Internado 30d</span>
+    <span class="chip meus" data-meus4="1">Meus pacientes</span>
+  </div>
+  <div class="distbar admin-only" id="distbar-ps" style="display:none">
+    <label class="sel-all"><input type="checkbox" id="sel-all-ps"> Selecionar todos os filtrados</label>
+    <span class="sub" id="sel-info-ps">0 selecionados</span>
+    <button class="btn pri" id="btn-dist-ps">&#9878; Distribuir selecionados entre os navegadores</button>
+  </div>
+  <div style="overflow-x:auto"><table id="tb4"><thead><tr>
+    <th class="admin-only chk-col"></th><th>Atend.</th><th>Paciente</th><th>Convênio</th><th>Especialidade</th><th>Agend. futuro</th><th>Retorno (dias)</th><th>Data fechamento</th><th>Méd. assistente / Encaminhamento</th><th>Internado 30d</th><th>Avaliador</th><th>Navegador</th><th>Ação</th>
+  </tr></thead><tbody id="bd4"></tbody></table></div>
+</div>
+
+<!-- ============ ACOMPANHAMENTO ============ -->
+<div class="panel" id="p-controle">
+  <div class="exp">
+    <button class="btn" id="btn-csv">&#11015; Exportar CSV dos contatos</button>
+  </div>
+  <div class="bar">
+    <input id="q2" placeholder="Buscar paciente...">
+    <span class="chip on" data-t2="ALL">Todos</span>
+    <span class="chip" data-t2="agend">Aguardando consulta</span>
+    <span class="chip" data-t2="ok">Compareceu</span>
+    <span class="chip" data-t2="noshow">No-show</span>
+    <span class="chip meus" data-meus2="1">Meus pacientes</span>
+  </div>
+  <div style="overflow-x:auto"><table id="tb2"><thead><tr>
+    <th>Trilha</th><th>Paciente</th><th>Data da consulta</th><th>Prestador</th><th>Situação</th><th>Navegador</th><th>Contatos</th><th>Ações</th>
+  </tr></thead><tbody id="bd2"></tbody></table></div>
+</div>
+
+<!-- ============ COBRANÇA · RECEPÇÃO ============ -->
+<div class="panel" id="p-cobranca">
+  <h2 class="sec">Consulta de cobrança — ambulatório CME</h2>
+  <div class="mini" style="margin-bottom:16px">
+    <div class="mgrid">
+      <div class="mrow"><label>Operadora do paciente</label><select id="cob-op"><option value="">— selecione —</option></select></div>
+      <div class="mrow"><label>Especialidade da consulta</label><select id="cob-esp"><option value="">— selecione —</option></select></div>
+    </div>
+    <div id="cob-res"></div>
+  </div>
+
+  <h2 class="sec">Fluxo de decisão do valor</h2>
+  <div class="mini" id="cob-fluxo" style="margin-bottom:16px"></div>
+
+  <h2 class="sec">Tabela de valores</h2>
+  <div class="mini" style="margin-bottom:16px;overflow-x:auto"><table id="cob-valores" style="box-shadow:none"><thead><tr>
+    <th style="cursor:default">Tipo</th><th style="cursor:default">Quando usar</th><th style="cursor:default">Valor</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <div class="split">
+    <div class="mini"><h3>&#9888; Exceções — não dar subsídio</h3><div id="cob-exc" class="chips-static"></div></div>
+    <div class="mini"><h3>&#9888; Planos suspensos para pós-alta</h3><div id="cob-susp" class="chips-static"></div>
+      <div class="note ns" style="margin:12px 0 0">Paciente de alta com risco de reinternação e plano suspenso: falar com a <b>Navegação</b> antes de negar o agendamento.</div>
+    </div>
+  </div>
+  <h2 class="sec">Códigos do sistema — Oncológico (R$ 500,00)</h2>
+  <div class="mini" id="cob-cod"></div>
+</div>
+
+<!-- ============ EQUIPE (admin) ============ -->
+<div class="panel" id="p-equipe">
+  <h2 class="sec">Criar usuário</h2>
+  <div class="mini" style="margin-bottom:16px">
+    <div class="mgrid">
+      <div class="mrow"><label>Nome</label><input id="eq-nome"></div>
+      <div class="mrow"><label>E-mail</label><input id="eq-email" type="email"></div>
+      <div class="mrow"><label>Senha inicial (mín. 6 caracteres)</label><input id="eq-senha" type="text"></div>
+      <div class="mrow"><label>Perfil</label><select id="eq-role">
+        <option value="navegador">Navegador</option>
+        <option value="recepcao">Recepção</option>
+        <option value="admin">Administrador</option>
+      </select></div>
+    </div>
+    <div class="mact"><button class="btn pri" id="btn-criar-user">+ Criar usuário</button></div>
+    <div class="sub" id="eq-msg"></div>
+  </div>
+  <h2 class="sec">Usuários</h2>
+  <div style="overflow-x:auto"><table id="eq-tb"><thead><tr>
+    <th>Nome</th><th>E-mail</th><th>Perfil</th><th>Pacientes atribuídos</th>
+  </tr></thead><tbody id="eq-bd"></tbody></table></div>
+  <div class="note" style="margin-top:14px"><b>Perfis.</b> <b>Administrador</b>: todas as abas, dashboard e distribuição de pacientes. <b>Navegador</b>: todas as abas exceto Dashboard e Equipe; trabalha a fila de pacientes atribuídos. <b>Recepção</b>: somente a aba Cobrança · Recepção.</div>
+</div>
+
+<div class="foot">Navegação Pós-Alta · CHN — dados compartilhados em tempo real via Firebase</div>
+</div>
+
+<!-- ============ MODAL CONTATO ============ -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h3 id="m-title"></h3>
+    <div class="mp" id="m-sub"></div>
+    <div class="msec">
+      <h4>Registrar contato</h4>
+      <div class="mrow"><label>Contato realizado?</label>
+        <select id="m-contato"><option value="">— selecione —</option><option value="SIM">Sim</option><option value="NAO">Não</option></select>
+      </div>
+      <div class="mrow" id="row-agendado" style="display:none"><label>Agendado?</label>
+        <select id="m-agendado"><option value="">— selecione —</option><option value="SIM">Sim</option><option value="NAO">Não</option><option value="OUTROS">Outros</option></select>
+      </div>
+      <div class="mrow" id="row-motivo" style="display:none"><label>Motivo</label><select id="m-motivo"></select></div>
+      <div class="mrow" id="row-texto" style="display:none"><label>Descreva</label><textarea id="m-texto"></textarea></div>
+      <div class="mgrid" id="row-agenda" style="display:none">
+        <div class="mrow"><label id="lb-agdata">Consulta de revisão · Data</label><input type="date" id="m-agdata"></div>
+        <div class="mrow"><label>Prestador (quem atenderá)</label><input id="m-agprest"></div>
+      </div>
+      <div class="mact">
+        <button class="btn pri" id="btn-reg">+ Registrar</button>
+        <button class="btn" id="btn-fechar">Fechar</button>
+      </div>
+      <div class="sub" id="m-err" style="color:var(--red)"></div>
+    </div>
+    <div id="m-agview"></div>
+    <div class="hist" id="m-hist"></div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

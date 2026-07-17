@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin() {
+      return signedIn() && myRole() == 'admin';
+    }
+    // admin e navegador operam a base de pacientes; recepção não acessa dados clínicos
+    function isStaff() {
+      return signedIn() && myRole() in ['admin', 'navegador'];
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      // o próprio usuário só pode se auto-cadastrar como 'pendente'; admin cria com qualquer perfil
+      allow create: if isAdmin()
+        || (signedIn() && request.auth.uid == uid && request.resource.data.role == 'pendente');
+      allow update, delete: if isAdmin();
+    }
+
+    match /pacientes/{atend} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+
+      match /contatos/{cid} {
+        allow read, create: if isStaff();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // exportação de CSV lê todos os contatos de uma vez (collectionGroup)
+    match /{path=**}/contatos/{cid} {
+      allow read: if isStaff();
+    }
+  }
+}
