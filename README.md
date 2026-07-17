@@ -26,7 +26,7 @@ App web multiusuário para a navegação de pacientes pós-alta (pronto-socorro 
 
 1. Crie um projeto (ex.: `navegacao-chn`). Google Analytics é opcional.
 2. **Authentication → Sign-in method → E-mail/senha → Ativar.**
-3. **Firestore Database → Criar banco de dados** (modo produção, região `southamerica-east1`).
+3. **Firestore Database → Criar banco de dados** — modo **produção**, região **`us-east1`** ou **`nam5`** (têm cota gratuita no plano Spark; `southamerica-east1`/São Paulo exige plano de cobrança Blaze).
 4. Em **Firestore → Regras**, cole o conteúdo de [`firestore.rules`](firestore.rules) e publique.
 5. Em **Configurações do projeto → Geral → Seus apps → ícone Web (`</>`)**, registre um app e copie o objeto `firebaseConfig`.
 6. Cole os valores em [`js/firebase-config.js`](js/firebase-config.js) e faça commit.
