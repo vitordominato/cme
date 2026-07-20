@@ -51,6 +51,7 @@
   <div class="tab" data-p="ps" data-roles="admin,navegador">Altas PS</div>
   <div class="tab" data-p="controle" data-roles="admin,navegador">Acompanhamento</div>
   <div class="tab" data-p="cobranca" data-roles="admin,navegador,recepcao">Cobrança · Recepção</div>
+  <div class="tab" data-p="regras" data-roles="admin,navegador,recepcao">Regras · Valores</div>
   <div class="tab" data-p="equipe" data-roles="admin">Equipe</div>
 </div>
 
@@ -211,21 +212,15 @@
 <!-- ============ COBRANÇA · RECEPÇÃO ============ -->
 <div class="panel" id="p-cobranca">
   <h2 class="sec">Consulta de cobrança — ambulatório CME</h2>
-  <div class="mini" style="margin-bottom:16px">
+  <div class="note verde" style="margin-top:0"><b>Atendimento rápido.</b> Selecione a operadora e a especialidade: o valor é calculado automaticamente pela matriz de credenciamento 2026. Se o paciente não tem plano, escolha <b>NÃO POSSUI PLANO</b> na própria lista de operadoras.</div>
+  <div class="mini placa-card" style="margin-bottom:16px">
     <div class="mgrid">
       <div class="mrow"><label>Operadora do paciente</label><select id="cob-op"><option value="">— selecione —</option></select></div>
       <div class="mrow"><label>Especialidade da consulta</label><select id="cob-esp"><option value="">— selecione —</option></select></div>
     </div>
+    <div id="cob-fluxo"></div>
     <div id="cob-res"></div>
   </div>
-
-  <h2 class="sec">Fluxo de decisão do valor</h2>
-  <div class="mini" id="cob-fluxo" style="margin-bottom:16px"></div>
-
-  <h2 class="sec">Tabela de valores</h2>
-  <div class="mini" style="margin-bottom:16px;overflow-x:auto"><table id="cob-valores" style="box-shadow:none"><thead><tr>
-    <th style="cursor:default">Tipo</th><th style="cursor:default">Quando usar</th><th style="cursor:default">Valor</th>
-  </tr></thead><tbody></tbody></table></div>
 
   <div class="split">
     <div class="mini"><h3>&#9888; Exceções — não dar subsídio</h3><div id="cob-exc" class="chips-static"></div></div>
@@ -233,8 +228,31 @@
       <div class="note ns" style="margin:12px 0 0">Paciente de alta com risco de reinternação e plano suspenso: falar com a <b>Navegação</b> antes de negar o agendamento.</div>
     </div>
   </div>
+</div>
+
+<!-- ============ REGRAS · VALORES ============ -->
+<div class="panel" id="p-regras">
+  <h2 class="sec">Regras utilizadas pela consulta automática</h2>
+  <div class="note verde" id="rg-fonte" style="margin-top:0"></div>
+  <div class="mini" id="rg-fluxo" style="margin-bottom:16px"></div>
+
+  <h2 class="sec">Tabela de valores</h2>
+  <div class="mini" style="margin-bottom:16px;overflow-x:auto"><table id="rg-valores" style="box-shadow:none"><thead><tr>
+    <th style="cursor:default">Tipo</th><th style="cursor:default">Quando usar</th><th style="cursor:default">Valor</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <div class="split">
+    <div class="mini"><h3>&#9888; Exceções — não dar subsídio</h3><div id="rg-exc" class="chips-static"></div></div>
+    <div class="mini"><h3>&#9888; Planos suspensos para pós-alta</h3><div id="rg-susp" class="chips-static"></div></div>
+  </div>
+
   <h2 class="sec">Códigos do sistema — Oncológico (R$ 500,00)</h2>
-  <div class="mini" id="cob-cod"></div>
+  <div class="mini" id="rg-cod" style="margin-bottom:16px"></div>
+
+  <h2 class="sec">Exames eletivos — convênios aceitos</h2>
+  <div class="mini" style="margin-bottom:16px;overflow-x:auto"><table id="rg-exames" style="box-shadow:none"><thead><tr>
+    <th style="cursor:default">Convênio</th><th style="cursor:default">Tipos de plano</th><th style="cursor:default">Tipos de exames</th>
+  </tr></thead><tbody></tbody></table></div>
 </div>
 
 <!-- ============ EQUIPE (admin) ============ -->

@@ -26,7 +26,6 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 
 const MOTIVOS_NAO_CONTATO = ['Agendado no CME', 'Consulta extra-CME', 'Outros'];
 const MOTIVOS_NAO_AGENDADO = ['Recusa', 'Consulta extra-CME', 'Outros'];
-const ESP_ONCO_MATRIZ = ['ONCOLOGIA', 'HEMATOLOGIA', 'CIRURGIA ONCOLÓGICA', 'CARDIO-ONCOLOGIA'];
 
 const state = {
   uid: null, nome: '', role: null,
@@ -800,22 +799,39 @@ $('btn-criar-user').onclick = async () => {
 };
 
 // ================================================================ COBRANÇA
+// Fluxo automatizado: a resposta sai da matriz de credenciamento 2026 (cobranca-data.js).
+// Só existem perguntas manuais nos pontos que a planilha não cobre (plano fora da lista
+// e enquadramento em regra especial de subsídio).
+const OP_SEM = '__SEM_PLANO__', OP_OUTRO = '__OUTRO__', OP_COLAB = '__COLAB__';
+const ONCO_CIR_CLIN = new Set(COBRANCA.onco_grupos.clinica_cirurgica);
+const ONCO_HEM = new Set(COBRANCA.onco_grupos.hematologia);
+const isOncoEsp = esp => ONCO_CIR_CLIN.has(esp) || ONCO_HEM.has(esp);
+const oncoCodigo = esp => ONCO_HEM.has(esp)
+  ? COBRANCA.guia.onco_codigos['Hematologia']
+  : COBRANCA.guia.onco_codigos['Cirurgia Oncológica e Oncologia Clínica'];
+
 let cobrancaInit = false;
+let cobMan = { hosp: null, regra: null };   // únicas respostas manuais possíveis
+
 function initCobranca() {
   if (cobrancaInit) return;
   cobrancaInit = true;
   const ops = COBRANCA.convenios.map(c => c.nome);
-  $('cob-op').innerHTML = '<option value="">— selecione —</option>' + ops.map(o => `<option>${esc(o)}</option>`).join('');
-  $('cob-esp').innerHTML = '<option value="">— selecione —</option>' + COBRANCA.especialidades.map(e2 => `<option>${esc(e2)}</option>`).join('');
-  $('cob-op').onchange = onCobChange; $('cob-esp').onchange = onCobChange;
+  $('cob-op').innerHTML = '<option value="">— selecione —</option>'
+    + `<option value="${OP_SEM}">NÃO POSSUI PLANO — atendimento particular</option>`
+    + `<option value="${OP_COLAB}">COLABORADOR AMÉRICAS (com crachá)</option>`
+    + `<option value="${OP_OUTRO}">OUTRO PLANO — não está na lista abaixo</option>`
+    + '<optgroup label="Planos credenciados no ambulatório CME (2026)">'
+    + ops.map(o => `<option>${esc(o)}</option>`).join('') + '</optgroup>';
+  $('cob-esp').innerHTML = '<option value="">— selecione —</option>' + COBRANCA.especialidades.map(e2 =>
+    `<option value="${esc(e2.nome)}">${esc(e2.nome)}${e2.item ? ' · item ' + esc(e2.item) : ''}</option>`).join('');
+  $('cob-op').onchange = () => { cobMan = { hosp: null, regra: null }; renderCobranca(); };
+  $('cob-esp').onchange = () => { cobMan = { hosp: null, regra: null }; renderCobranca(); };
 
-  document.querySelector('#cob-valores tbody').innerHTML = COBRANCA.guia.valores.map(v =>
-    `<tr><td class="pac">${esc(v.tipo)}</td><td>${esc(v.quando)}</td><td style="font-weight:700;color:var(--navy)">${esc(v.valor)}</td></tr>`).join('');
   $('cob-exc').innerHTML = COBRANCA.guia.excecoes_subsidio.map(x => `<span class="chip">${esc(x)}</span>`).join('');
   $('cob-susp').innerHTML = COBRANCA.guia.suspensos_posalta.map(x => `<span class="chip">${esc(x)}</span>`).join('');
-  $('cob-cod').innerHTML = Object.entries(COBRANCA.guia.onco_codigos).map(([k, v]) =>
-    `<div class="brow"><div class="bl" style="width:auto;min-width:260px">${esc(k)}</div><div style="font-weight:700;color:var(--navy)">${esc(v)}</div></div>`).join('');
-  renderFluxo();
+  renderCobranca();
+  renderRegras();
 }
 
 function convByName(nome) { return COBRANCA.convenios.find(c => c.nome === nome) || null; }
@@ -823,71 +839,146 @@ function inLista(convNome, lista) {
   const n = norm(convNome);
   return lista.some(x => { const m = norm(x); return n.includes(m) || m.includes(n); });
 }
-function badge(v, simTxt, naoTxt) {
-  if (v === true) return `<span class="cob-badge sim">${simTxt}</span>`;
-  if (v === false) return `<span class="cob-badge nao">${naoTxt}</span>`;
-  return '<span class="cob-badge info">sem informação</span>';
-}
 
-let fluxoAns = { plano: null, amb: null, hosp: null, regra: null };
+function renderCobranca() {
+  const op = $('cob-op').value, esp = $('cob-esp').value;
+  const steps = [];   // {q, ans, tone:'sim'|'nao'|'info', manual?:{key, opts}}
+  const warns = [];
+  let resultado = null;  // {titulo, valor, pay, obs[]}
 
-function onCobChange() {
-  const opNome = $('cob-op').value, esp = $('cob-esp').value;
-  const conv = convByName(opNome);
-  let html = '';
-  let ambCobre = null;
-  if (conv && esp) {
-    if (ESP_ONCO_MATRIZ.includes(esp)) {
-      const c = esp === 'HEMATOLOGIA' ? conv.hem_c : conv.onco_c;
-      const t = esp === 'HEMATOLOGIA' ? conv.hem_t : conv.onco_t;
-      ambCobre = c === true;
-      html += `<div style="margin-top:12px"><b>${esc(esp)}</b> (matriz onco/hemato): Consulta ${badge(c, 'coberta', 'não coberta')} · Tratamento/Infusão ${badge(t, 'coberto', 'não coberto')}</div>`;
-      if (c === false) html += `<div class="sub" style="margin-top:6px">Consulta não coberta → aplicar tabela oncológica (Particular Oncológico R$ 500,00 ou código do sistema).</div>`;
-    } else {
-      const mark = conv.esps ? conv.esps[esp] : undefined;
-      ambCobre = !!mark;
-      html += `<div style="margin-top:12px"><b>${esc(esp)}</b>: ` + (mark
-        ? `<span class="cob-badge sim">ambulatório cobre${String(mark).includes('ADULTO') ? ' (somente adulto)' : ''}</span>`
-        : '<span class="cob-badge nao">ambulatório NÃO cobre</span>') + '</div>';
-    }
-    if (inLista(opNome, COBRANCA.guia.excecoes_subsidio)) html += `<div style="margin-top:8px"><span class="cob-badge warn">&#9888; ${esc(opNome)}: NÃO dar subsídio (lista de exceções)</span></div>`;
-    if (inLista(opNome, COBRANCA.guia.suspensos_posalta)) html += `<div style="margin-top:8px"><span class="cob-badge warn">&#9888; ${esc(opNome)}: plano SUSPENSO para pós-alta — falar com a Navegação</span></div>`;
-  } else {
-    html = '<div class="sub" style="margin-top:10px">Selecione operadora e especialidade para ver a cobertura.</div>';
+  const auto = (q, ans, tone) => steps.push({ q, ans, tone });
+  const manual = (q, key, opts) => steps.push({ q, manual: { key, opts } });
+
+  if (op && op !== OP_SEM && op !== OP_OUTRO && op !== OP_COLAB) {
+    if (inLista(op, COBRANCA.guia.excecoes_subsidio)) warns.push(`${op}: NÃO dar subsídio (lista de exceções)`);
+    if (inLista(op, COBRANCA.guia.suspensos_posalta)) warns.push(`${op}: plano SUSPENSO para pós-alta — falar com a Navegação`);
   }
+
+  if (!op) {
+    $('cob-fluxo').innerHTML = '';
+    $('cob-res').innerHTML = '<div class="sub" style="margin-top:10px">Selecione a operadora (ou "NÃO POSSUI PLANO") para calcular o valor.</div>';
+    return;
+  }
+
+  if (op === OP_COLAB) {
+    auto('Colaborador Américas com crachá?', 'SIM — exigir apresentação do crachá', 'sim');
+    resultado = { titulo: 'Colaborador Américas (103)', valor: 'R$ 100,00', pay: true, obs: ['Somente com crachá do colaborador.'] };
+  } else if (!esp) {
+    $('cob-fluxo').innerHTML = '';
+    $('cob-res').innerHTML = '<div class="sub" style="margin-top:10px">Agora selecione a especialidade da consulta.</div>';
+    return;
+  } else if (op === OP_SEM) {
+    auto('O paciente tem plano de saúde?', 'NÃO — informado na seleção da operadora', 'nao');
+    if (isOncoEsp(esp)) {
+      auto('Especialidade oncológica/hematológica?', 'SIM — aplica tabela oncológica', 'info');
+      resultado = { titulo: 'Particular Oncológico', valor: 'R$ 500,00', pay: true, obs: [`Código do sistema: ${oncoCodigo(esp)}.`] };
+    } else {
+      resultado = { titulo: 'Particular Integral', valor: 'R$ 300,00', pay: true, obs: [] };
+    }
+  } else if (op === OP_OUTRO) {
+    auto('O ambulatório CME aceita o plano?', 'NÃO — plano fora da matriz de credenciamento 2026', 'nao');
+    manual('O plano é aceito pelo HOSPITAL CHN? (conferir no cadastro do hospital)', 'hosp', [['SIM', 'Sim'], ['NAO', 'Não']]);
+    if (cobMan.hosp === 'NAO') {
+      resultado = isOncoEsp(esp)
+        ? { titulo: 'Particular Oncológico', valor: 'R$ 500,00', pay: true, obs: [`Código do sistema: ${oncoCodigo(esp)}.`] }
+        : { titulo: 'Particular Integral', valor: 'R$ 300,00', pay: true, obs: [] };
+    } else if (cobMan.hosp === 'SIM') {
+      if (isOncoEsp(esp)) {
+        auto('Especialidade oncológica/hematológica?', 'SIM — plano aceito, mas sem contrato de tratamento no ambulatório', 'info');
+        resultado = { titulo: 'Oncologia com plano aceito CHN', valor: 'R$ 500,00', pay: true, obs: [`Código do sistema: ${oncoCodigo(esp)}.`] };
+      } else {
+        manual('Encaixa em regra especial de subsídio? (cirurgia, especialidade estratégica, pós-alta, tratamento onco, Bradesco em certas áreas)', 'regra', [['SIM', 'Sim'], ['NAO', 'Não']]);
+        if (cobMan.regra === 'SIM') resultado = { titulo: 'Subsídio CHN', valor: 'Conforme regra', pay: false, obs: ['Confira antes a lista de exceções — plano não listado exige validação do subsídio.'] };
+        if (cobMan.regra === 'NAO') resultado = { titulo: 'Condição Especial (102)', valor: 'R$ 200,00', pay: true, obs: [] };
+      }
+    }
+  } else {
+    // operadora credenciada no ambulatório
+    const conv = convByName(op);
+    const mark = conv && conv.esps ? conv.esps[esp] : undefined;
+    auto('O paciente tem plano de saúde?', 'SIM — ' + op, 'sim');
+    if (mark) {
+      const restr = String(mark).includes('ADULTO') ? ' (somente ADULTO)' : String(mark).includes('PEDIATRICO') ? ' (somente PEDIÁTRICO)' : '';
+      auto('O ambulatório cobre a especialidade para este plano?', 'SIM — consta na matriz 2026' + restr, 'sim');
+      resultado = { titulo: 'Atendimento pelo plano', valor: 'Sem cobrança adicional', pay: false, obs: [] };
+      if (restr) resultado.obs.push('Atenção: cobertura restrita' + restr.toLowerCase() + ' — fora do perfil, tratar como não coberta.');
+      if (isOncoEsp(esp)) {
+        const t = ONCO_HEM.has(esp) ? conv.hem_t : conv.onco_t;
+        if (t === true) resultado.obs.push('Tratamento/infusão onco-hematológico: convênio COM possibilidade de tratamento (Subsídio Oncologia).');
+        else if (t === false) resultado.obs.push('Tratamento/infusão onco-hematológico: SEM cobertura de tratamento — consulta coberta, tratamento seguirá tabela oncológica.');
+        else resultado.obs.push('Tratamento/infusão onco-hematológico: sem informação — confirmar com a Central Onco.');
+      }
+    } else {
+      auto('O ambulatório cobre a especialidade para este plano?', 'NÃO — não consta na matriz 2026', 'nao');
+      auto('O plano é aceito pelo HOSPITAL CHN?', 'SIM — operadora credenciada CHN', 'sim');
+      if (isOncoEsp(esp)) {
+        const t = ONCO_HEM.has(esp) ? conv.hem_t : conv.onco_t;
+        if (t === true) {
+          auto('Convênio com possibilidade de tratamento onco/hemato?', 'SIM — vide matriz de tratamento', 'sim');
+          resultado = { titulo: 'Subsídio Oncologia', valor: 'Subsídio', pay: false, obs: ['Confirmar enquadramento com a Central Onco antes de fechar o atendimento.'] };
+        } else {
+          auto('Convênio com possibilidade de tratamento onco/hemato?', t === false ? 'NÃO — sem contrato de tratamento' : 'SEM INFORMAÇÃO — tratar como sem contrato e confirmar', t === false ? 'nao' : 'info');
+          resultado = { titulo: 'Oncologia com plano aceito CHN', valor: 'R$ 500,00', pay: true, obs: [`Código do sistema: ${oncoCodigo(esp)}.`] };
+        }
+      } else if (inLista(op, COBRANCA.guia.excecoes_subsidio)) {
+        auto('Encaixa em regra especial de subsídio?', 'NÃO — operadora na lista de exceções (não dar subsídio)', 'nao');
+        resultado = { titulo: 'Condição Especial (102)', valor: 'R$ 200,00', pay: true, obs: [] };
+      } else {
+        manual('Encaixa em regra especial de subsídio? (cirurgia, especialidade estratégica, pós-alta, tratamento onco, Bradesco em certas áreas)', 'regra', [['SIM', 'Sim'], ['NAO', 'Não']]);
+        if (cobMan.regra === 'SIM') resultado = { titulo: 'Subsídio CHN', valor: 'Conforme regra', pay: false, obs: [] };
+        if (cobMan.regra === 'NAO') resultado = { titulo: 'Condição Especial (102)', valor: 'R$ 200,00', pay: true, obs: [] };
+      }
+    }
+  }
+
+  $('cob-fluxo').innerHTML = steps.map((s, i) => {
+    if (s.manual) {
+      const btns = s.manual.opts.map(([v, lb]) =>
+        `<span class="fbtn${cobMan[s.manual.key] === v ? ' on' : ''}" data-fx="${s.manual.key}" data-v="${v}">${lb}</span>`).join('');
+      return `<div class="fstep${cobMan[s.manual.key] ? ' done' : ''}"><div class="fq">${i + 1}. ${esc(s.q)}</div><div class="fbtns">${btns}</div></div>`;
+    }
+    return `<div class="fstep done auto"><div class="fq">${i + 1}. ${esc(s.q)} <span class="auto-tag">automático</span></div><div><span class="cob-badge ${s.tone}">${esc(s.ans)}</span></div></div>`;
+  }).join('');
+
+  let html = '';
+  if (resultado) {
+    html += `<div class="placa${resultado.pay ? ' pay' : ''}"><div class="placa-tt">${esc(resultado.titulo)}</div><div class="placa-v">${esc(resultado.valor)}</div>`
+      + resultado.obs.map(o => `<div class="placa-obs">${esc(o)}</div>`).join('') + '</div>';
+  } else if (steps.some(s => s.manual && !cobMan[s.manual.key])) {
+    html += '<div class="sub" style="margin-top:8px">Responda a pergunta destacada para concluir.</div>';
+  }
+  html += warns.map(w => `<div style="margin-top:8px"><span class="cob-badge warn">&#9888; ${esc(w)}</span></div>`).join('');
   $('cob-res').innerHTML = html;
-  fluxoAns = { plano: conv ? 'SIM' : fluxoAns.plano, amb: ambCobre === null ? null : (ambCobre ? 'SIM' : 'NAO'), hosp: null, regra: null };
-  renderFluxo();
-}
-
-function renderFluxo() {
-  const a = fluxoAns;
-  const step = (n, pergunta, key, opcoes, visivel) => {
-    if (!visivel) return '';
-    const btns = opcoes.map(([v, lb]) =>
-      `<span class="fbtn${a[key] === v ? ' on' : ''}" data-fx="${key}" data-v="${v}">${lb}</span>`).join('');
-    return `<div class="fstep${a[key] ? ' done' : ''}"><div class="fq">${n}. ${pergunta}</div><div class="fbtns">${btns}</div></div>`;
-  };
-  let resultado = '';
-  const excecao = $('cob-op').value && inLista($('cob-op').value, COBRANCA.guia.excecoes_subsidio);
-  if (a.plano === 'NAO') resultado = 'Particular Integral · R$ 300,00';
-  else if (a.plano === 'SIM' && a.amb === 'SIM') resultado = 'Pelo plano · Sem cobrança adicional';
-  else if (a.amb === 'NAO' && a.hosp === 'NAO') resultado = 'Particular Integral · R$ 300,00';
-  else if (a.amb === 'NAO' && a.hosp === 'SIM' && a.regra === 'NAO') resultado = 'Condição Especial (102) · R$ 200,00';
-  else if (a.amb === 'NAO' && a.hosp === 'SIM' && a.regra === 'SIM') resultado = 'Subsídio CHN · Conforme regra' + (excecao ? ' — ATENÇÃO: operadora na lista de exceções, NÃO dar subsídio!' : '');
-
-  $('cob-fluxo').innerHTML =
-    step(1, 'O paciente tem plano de saúde?', 'plano', [['SIM', 'Tem plano'], ['NAO', 'Não tem plano']], true) +
-    step(2, 'O ambulatório aceita o plano para esta especialidade? (pré-respondido pela matriz acima)', 'amb', [['SIM', 'Sim'], ['NAO', 'Não']], a.plano === 'SIM') +
-    step(3, 'O plano é aceito pelo HOSPITAL CHN?', 'hosp', [['SIM', 'Sim'], ['NAO', 'Não']], a.plano === 'SIM' && a.amb === 'NAO') +
-    step(4, 'Encaixa em regra especial de subsídio? (cirurgia, especialidade estratégica, pós-alta, tratamento onco, Bradesco em certas áreas)', 'regra', [['SIM', 'Sim'], ['NAO', 'Não']], a.plano === 'SIM' && a.amb === 'NAO' && a.hosp === 'SIM') +
-    (resultado ? `<div class="fresult${resultado.includes('R$') ? ' pay' : ''}">${esc(resultado)}</div>` : '<div class="sub" style="margin-top:8px">Responda as perguntas para chegar ao valor.</div>');
 
   $('cob-fluxo').querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
-    fluxoAns[b.dataset.fx] = b.dataset.v;
-    // limpa respostas das etapas seguintes
-    const ordem = ['plano', 'amb', 'hosp', 'regra'];
-    ordem.slice(ordem.indexOf(b.dataset.fx) + 1).forEach(k => { fluxoAns[k] = null; });
-    renderFluxo();
+    cobMan[b.dataset.fx] = b.dataset.v;
+    if (b.dataset.fx === 'hosp') cobMan.regra = null;
+    renderCobranca();
   });
+}
+
+// ================================================================ REGRAS · VALORES
+function renderRegras() {
+  const f = COBRANCA.fonte;
+  $('rg-fonte').innerHTML = `<b>Fonte.</b> ${esc(f.documento)} · ${esc(f.atualizacao)}.<br>` +
+    `As respostas da aba Cobrança · Recepção saem automaticamente desta matriz — não é preciso consultar a planilha durante o atendimento.` +
+    (f.observacao ? `<br><span class="sub">${esc(f.observacao)}</span>` : '');
+
+  $('rg-fluxo').innerHTML = `<h3>Ordem de decisão aplicada automaticamente</h3><ol class="regras-ol">
+    <li><b>Sem plano</b> (opção "NÃO POSSUI PLANO"): especialidade oncológica/hematológica → <b>Particular Oncológico R$ 500,00</b> (com código do sistema); demais → <b>Particular Integral R$ 300,00</b>.</li>
+    <li><b>Colaborador Américas</b> com crachá → <b>R$ 100,00 (código 103)</b>.</li>
+    <li><b>Plano credenciado + especialidade coberta na matriz 2026</b> → atendimento <b>pelo plano, sem cobrança</b> (respeitando restrições "somente adulto/pediátrico").</li>
+    <li><b>Plano credenciado + especialidade NÃO coberta</b>: o plano é aceito pelo hospital (credenciado CHN). Oncologia/hematologia: com possibilidade de tratamento → <b>Subsídio Oncologia</b>; sem → <b>R$ 500,00</b>. Demais especialidades: operadora na lista de exceções → <b>Condição Especial (102) R$ 200,00</b>; senão, única pergunta manual: <b>regra especial de subsídio?</b> Sim → Subsídio CHN · Não → R$ 200,00.</li>
+    <li><b>Outro plano (fora da lista)</b>: pergunta manual "aceito pelo hospital CHN?" Não → Particular (R$ 300,00 / R$ 500,00 onco). Sim → segue o passo 4.</li>
+    <li><b>Alertas automáticos</b>: operadoras da lista de exceções (sem subsídio) e planos suspensos para pós-alta são sinalizados na tela.</li>
+  </ol>`;
+
+  document.querySelector('#rg-valores tbody').innerHTML = COBRANCA.guia.valores.map(v =>
+    `<tr><td class="pac">${esc(v.tipo)}</td><td>${esc(v.quando)}</td><td style="font-weight:700;color:var(--roxo)">${esc(v.valor)}</td></tr>`).join('');
+  $('rg-exc').innerHTML = COBRANCA.guia.excecoes_subsidio.map(x => `<span class="chip">${esc(x)}</span>`).join('');
+  $('rg-susp').innerHTML = COBRANCA.guia.suspensos_posalta.map(x => `<span class="chip">${esc(x)}</span>`).join('');
+  $('rg-cod').innerHTML = Object.entries(COBRANCA.guia.onco_codigos).map(([k, v]) =>
+    `<div class="brow"><div class="bl" style="width:auto;min-width:260px">${esc(k)}</div><div style="font-weight:700;color:var(--roxo)">${esc(v)}</div></div>`).join('');
+  document.querySelector('#rg-exames tbody').innerHTML = COBRANCA.exames.map(x =>
+    `<tr><td class="pac">${esc(x.nome)}</td><td>${esc(x.planos)}${x.exceto ? `<div class="sub" style="color:var(--red)">Exceto: ${esc(x.exceto)}</div>` : ''}</td><td>${esc(x.exames)}</td></tr>`).join('');
 }
