@@ -584,7 +584,7 @@ $('file-altas').onchange = async e => {
       return { atend: item.atend, data: base };
     });
     await commitDocs(updates);
-    $('altas-info').textContent = `Altas importadas: ${updates.length} elegíveis · ${excl} excluídas (berçário/day clinic/Z38/O80) — ${nowBR()}.`;
+    $('altas-info').textContent = `Altas importadas: ${updates.length} elegíveis · ${excl} excluídas (óbito/berçário/day clinic/Z38/O80) — ${nowBR()}.`;
   } catch (err) { alert('Erro ao importar altas: ' + err.message); }
 };
 

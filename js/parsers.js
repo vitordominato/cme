@@ -16,6 +16,11 @@ function stripId(v) {
   return clean(v).replace(/\.0$/, '');
 }
 
+// Alta por óbito não entra na navegação pós-alta (compara sem acentos: "ÓBITO"/"OBITO").
+function ehObito(motivo) {
+  return String(motivo).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes('OBITO');
+}
+
 function sheetMatrix(wb) {
   const sh = wb.Sheets[wb.SheetNames[0]];
   return XLSX.utils.sheet_to_json(sh, { header: 1, raw: true, defval: '' });
@@ -117,7 +122,8 @@ function parseAltasBaseAnalitica(rows, h) {
     seen.add(atend);
     const origem = clean(rows[r][c.origem]);
     const unidade = clean(rows[r][c.unid]);
-    if (origem.toUpperCase().includes('DAY C') || unidade.toUpperCase().includes('BERCARIO')) { excl++; continue; }
+    const motivo = clean(rows[r][c.motivo]);
+    if (origem.toUpperCase().includes('DAY C') || unidade.toUpperCase().includes('BERCARIO') || ehObito(motivo)) { excl++; continue; }
     const dAdm = parseDateAny(rows[r][c.dtAtend]);
     const dAlta = parseDateAny(rows[r][c.dtAlta]);
     const dih = (dAdm && dAlta) ? Math.round((dAlta - dAdm) / DAY) : null;
@@ -126,7 +132,7 @@ function parseAltasBaseAnalitica(rows, h) {
       atend, codpac: c.codpac >= 0 ? stripId(rows[r][c.codpac]) : '',
       pac, anos: isNaN(anos) ? null : anos, idadeStr: clean(rows[r][c.idade]),
       sexo: clean(rows[r][c.sexo]).charAt(0).toUpperCase(), convenio: clean(rows[r][c.conv]),
-      cid: '', dih, origemAdm: origem, unidade, motivo: clean(rows[r][c.motivo]),
+      cid: '', dih, origemAdm: origem, unidade, motivo,
       med: '', alta: toBR(dAlta), altaISO: toISO(dAlta),
     });
   }
@@ -158,15 +164,16 @@ function parseAltasMV(rows) {
     if (!/^\d{6,}$/.test(atend) || !pac || seen.has(atend)) continue;
     seen.add(atend);
     const origem = clean(at(r + 4, 9));
+    const motivo = clean(at(r + 2, 14));
     const uUnid = unidade.toUpperCase(), uOrig = origem.toUpperCase();
-    if (uOrig.includes('DAY C') || uUnid.includes('DAY C') || uUnid.includes('BERCARIO')) { excl++; continue; }
+    if (uOrig.includes('DAY C') || uUnid.includes('DAY C') || uUnid.includes('BERCARIO') || ehObito(motivo)) { excl++; continue; }
     const dAdm = parseDateAny(at(r, 11));
     const dAlta = parseDateAny(at(r, 18));
     const dih = (dAdm && dAlta) ? Math.round((dAlta - dAdm) / DAY) : null;
     items.push({
       atend, codpac: stripId(at(r, 3)), pac, anos: null, idadeStr: '', sexo: '',
       convenio: clean(at(r + 2, 11)), cid: '', dih, origemAdm: origem, unidade,
-      motivo: clean(at(r + 2, 14)), med: clean(at(r, 9)),
+      motivo, med: clean(at(r, 9)),
       alta: toBR(dAlta), altaISO: toISO(dAlta),
     });
   }
