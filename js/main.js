@@ -276,7 +276,7 @@ function altasList() {
     if (f.dtfim && (d.altaISO || '') > f.dtfim) return false;
     if (f.q3) {
       const q = f.q3.toLowerCase();
-      const blob = [d.pac, d.unidade, d.origemAdm, d.cid, d.atend].join(' ').toLowerCase();
+      const blob = [d.pac, d.unidade, d.origemAdm, d.cid, d.atend, d.codpac].join(' ').toLowerCase();
       if (!blob.includes(q)) return false;
     }
     return true;
@@ -311,6 +311,7 @@ function renderAltas() {
     return `<tr>${chk}
       <td><span class="score">${d.score ?? '—'}</span><br><span class="tier ${d.tier}">${d.tier || ''}</span></td>
       <td><span class="sub">${d.fonte === 'completo' ? 'censo · completo' : 'parcial'}</span></td>
+      <td>${esc(d.codpac || '—')}</td>
       <td>${esc(d.atend)}</td>
       <td><span class="pac">${esc(d.pac)}</span>${d.cid ? `<div class="sub">CID ${esc(d.cid)}</div>` : ''}${d.med ? `<div class="sub">${esc(d.med)}</div>` : ''}<div class="flags">${flags}</div>${d.alerta_noshow ? '<span class="ns-badge">RISCO NO-SHOW</span>' : ''}</td>
       <td>${d.anos != null ? d.anos : (d.idade != null ? d.idade : '—')}</td>
@@ -324,7 +325,7 @@ function renderAltas() {
       <td class="orient">${esc(d.orientacao || '')}</td>
       <td><button class="btn" data-open="${esc(d.atend)}">Abrir</button></td>
     </tr>`;
-  }).join('') || `<tr><td colspan="15" class="sub" style="padding:18px">Nenhuma alta na base — carregue um arquivo de altas acima.</td></tr>`;
+  }).join('') || `<tr><td colspan="16" class="sub" style="padding:18px">Nenhuma alta na base — carregue um arquivo de altas acima.</td></tr>`;
   $('sel-info-altas').textContent = state.selAltas.size + ' selecionados';
   wireRowEvents($('bd3'), 'sel3', state.selAltas, 'sel-info-altas');
 }
@@ -340,7 +341,7 @@ function psList() {
     if (f.meus4 && d.assignedTo !== state.uid) return false;
     if (f.q4) {
       const q = f.q4.toLowerCase();
-      const blob = [d.pac, p.esp, d.convenio, p.aval, d.atend].join(' ').toLowerCase();
+      const blob = [d.pac, p.esp, d.convenio, p.aval, d.atend, p.codpac, d.codpac].join(' ').toLowerCase();
       if (!blob.includes(q)) return false;
     }
     return true;
@@ -365,7 +366,8 @@ function renderPS() {
     const p = d.ps || {};
     const chk = isAdmin ? `<td><input type="checkbox" data-sel4="${esc(d.atend)}"${state.selPS.has(d.atend) ? ' checked' : ''}></td>` : '';
     return `<tr>${chk}
-      <td>${esc(d.atend)}<div class="sub">${esc(p.codpac || '')}</div></td>
+      <td>${esc(p.codpac || d.codpac || '—')}</td>
+      <td>${esc(d.atend)}</td>
       <td><span class="pac">${esc(d.pac)}</span></td>
       <td>${esc(d.convenio || '—')}</td>
       <td>${esc(p.esp || '—')}</td>
@@ -378,7 +380,7 @@ function renderPS() {
       <td>${navTag(d)}</td>
       <td><button class="btn" data-open="${esc(d.atend)}">Abrir</button></td>
     </tr>`;
-  }).join('') || `<tr><td colspan="13" class="sub" style="padding:18px">Nenhum egresso do PS na base — carregue o export 6906 acima.</td></tr>`;
+  }).join('') || `<tr><td colspan="14" class="sub" style="padding:18px">Nenhum egresso do PS na base — carregue o export 6906 acima.</td></tr>`;
   $('sel-info-ps').textContent = state.selPS.size + ' selecionados';
   wireRowEvents($('bd4'), 'sel4', state.selPS, 'sel-info-ps');
 }
@@ -567,6 +569,7 @@ $('file-altas').onchange = async e => {
         origens: { alta: true }, altaEm: serverTimestamp(), atualizadoPor: state.nome,
       };
       if (item.med) base.med = item.med;
+      if (item.codpac) base.codpac = item.codpac;
       if (existing && existing.origens && existing.origens.censo && ['A', 'B', 'C'].includes(existing.trilha)) {
         // cruzou com o censo: mantém o score completo
         base.fonte = 'completo';
@@ -599,6 +602,7 @@ $('file-ps').onchange = async e => {
               int30: item.int30, aval: item.aval || '' },
         origens: { ps: true }, psEm: serverTimestamp(), atualizadoPor: state.nome,
       };
+      if (item.codpac) data.codpac = item.codpac;
       if (!existing || !existing.trilha) {
         data.trilha = 'PS'; data.tier = '—';
         data.orientacao = 'Egresso do PS' + (item.agfut ? ' com agendamento futuro.' : ' SEM agendamento futuro: contatar e marcar retorno na especialidade recomendada' + (item.esp ? ' (' + item.esp + ')' : '') + (item.retorno != null ? ', retorno em ' + item.retorno + ' dias' : '') + '.');

@@ -8,7 +8,8 @@ const DAY = 86400000;
 function clean(v) {
   const s = String(v == null ? '' : v).trim();
   if (s.includes('img src')) return 'SIM'; // SoulMV exporta flags booleanas como <img>
-  return s.replace(/<[^>]*>/g, '').trim();
+  // <br> vira espaço antes de remover as demais tags: "Cód.<br>Paciente" → "Cód. Paciente"
+  return s.replace(/<\/?br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function stripId(v) {
@@ -102,7 +103,7 @@ export function parseCenso(wb) {
 function parseAltasBaseAnalitica(rows, h) {
   const col = makeCol(rows[h]);
   const c = {
-    atend: col('CD_ATENDIMENTO'), origem: col('ORIGEM'), pac: col('PACIENTE_ABREV'),
+    atend: col('CD_ATENDIMENTO'), codpac: col('CD_PACIENTE'), origem: col('ORIGEM'), pac: col('PACIENTE_ABREV'),
     dtAtend: col('DT_ATENDIMENTO'), dtAlta: col('DT_ALTA_MEDICA'), hrAlta: col('HR_ALTA_MEDICA'),
     conv: col('NM_CONVENIO'), idade: col('IDADE'), sexo: col('SEXO'),
     motivo: col('MOTIVO_ALTA'), unid: col('DS_UNID_INT'),
@@ -122,7 +123,8 @@ function parseAltasBaseAnalitica(rows, h) {
     const dih = (dAdm && dAlta) ? Math.round((dAlta - dAdm) / DAY) : null;
     const anos = c.idade >= 0 ? parseInt(clean(rows[r][c.idade]), 10) : NaN;
     items.push({
-      atend, pac, anos: isNaN(anos) ? null : anos, idadeStr: clean(rows[r][c.idade]),
+      atend, codpac: c.codpac >= 0 ? stripId(rows[r][c.codpac]) : '',
+      pac, anos: isNaN(anos) ? null : anos, idadeStr: clean(rows[r][c.idade]),
       sexo: clean(rows[r][c.sexo]).charAt(0).toUpperCase(), convenio: clean(rows[r][c.conv]),
       cid: '', dih, origemAdm: origem, unidade, motivo: clean(rows[r][c.motivo]),
       med: '', alta: toBR(dAlta), altaISO: toISO(dAlta),
