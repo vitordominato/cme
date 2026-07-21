@@ -47,8 +47,7 @@
 
 <div class="tabs" id="tabs">
   <div class="tab" data-p="dash" data-roles="admin">Dashboard</div>
-  <div class="tab" data-p="altas" data-roles="admin,navegador">Altas do Dia</div>
-  <div class="tab" data-p="ps" data-roles="admin,navegador">Altas PS</div>
+  <div class="tab" data-p="abordar" data-roles="admin,navegador">Pacientes a Abordar</div>
   <div class="tab" data-p="controle" data-roles="admin,navegador">Acompanhamento</div>
   <div class="tab" data-p="cobranca" data-roles="admin,navegador,recepcao">Cobrança · Recepção</div>
   <div class="tab" data-p="regras" data-roles="admin,navegador,recepcao">Regras · Valores</div>
@@ -111,31 +110,35 @@
   </div>
 </div>
 
-<!-- ============ ALTAS DO DIA ============ -->
-<div class="panel" id="p-altas">
+<!-- ============ PACIENTES A ABORDAR ============ -->
+<div class="panel" id="p-abordar">
   <div class="exp" style="align-items:center">
-    <button class="btn pri" onclick="document.getElementById('file-altas').click()">&#128194; Carregar altas hospitalares (.xlsx / .xls)</button>
+    <button class="btn pri" onclick="document.getElementById('file-altas').click()">&#128194; Carregar altas hospitalares (MV / BI / 7101)</button>
     <input type="file" id="file-altas" accept=".xls,.xlsx" style="display:none">
-    <button class="btn" onclick="document.getElementById('file-censo').click()">&#128194; Atualizar censo (export SoulMV .xls)</button>
+    <button class="btn pri" onclick="document.getElementById('file-ps').click()">&#128194; Carregar egressos do PS (export 6906)</button>
+    <input type="file" id="file-ps" accept=".xls,.xlsx" style="display:none">
+    <button class="btn" onclick="document.getElementById('file-censo').click()">&#128194; Atualizar censo (export SoulMV)</button>
     <input type="file" id="file-censo" accept=".xls,.xlsx" style="display:none">
-    <span class="sub" id="altas-info"></span>
+    <span class="sub" id="imp-info"></span>
   </div>
   <div class="kpis">
-    <div class="kpi"><div class="n" id="al-tot">0</div><div class="l">Altas elegíveis</div></div>
-    <div class="kpi alto"><div class="n" id="al-alto">0</div><div class="l">Alto risco</div><div class="s">ligar primeiro</div></div>
-    <div class="kpi medio"><div class="n" id="al-medio">0</div><div class="l">Médio risco</div></div>
-    <div class="kpi a"><div class="n" id="al-cruz">0</div><div class="l">Com score completo</div><div class="s">cruzou com o censo</div></div>
-    <div class="kpi c"><div class="n" id="al-atrib">0</div><div class="l">Com navegador</div><div class="s">distribuídos</div></div>
+    <div class="kpi"><div class="n" id="ab-tot">0</div><div class="l">Pacientes a abordar</div><div class="s">internação + PS, sem repetição</div></div>
+    <div class="kpi alto"><div class="n" id="ab-alto">0</div><div class="l">Alto risco</div><div class="s">ligar primeiro</div></div>
+    <div class="kpi medio"><div class="n" id="ab-medio">0</div><div class="l">Médio risco</div></div>
+    <div class="kpi ns"><div class="n" id="ab-pssem">0</div><div class="l">PS sem agendamento</div><div class="s">fechar a lacuna</div></div>
+    <div class="kpi c"><div class="n" id="ab-atrib">0</div><div class="l">Com navegador</div><div class="s">distribuídos</div></div>
   </div>
 
-  <h2 class="sec">Lista de altas</h2>
-  <div class="note"><b>Score parcial de alta.</b> Quando o paciente não cruza com o censo de internados, a priorização usa: DIH (&ge;15d +3 &middot; 8&ndash;14d +2 &middot; 4&ndash;7d +1), admissão via emergência (+2), idade &gt;50 (+2) e, quando o arquivo trouxer CID, o grupo diagnóstico de risco. Alto &ge;5 &middot; Médio 3&ndash;4. Exclusões automáticas na importação: óbito (quando o arquivo trouxer o motivo da alta), berçário e day clinic (e, quando houver CID: Z38 recém-nascido saudável e O80 parto).</div>
+  <h2 class="sec">Fila única de navegação</h2>
+  <div class="note"><b>Fila unificada.</b> Altas de internação (MV, BI ou 7101 — os arquivos se complementam no mesmo registro) e egressos do PS (relatório 6906) em uma lista só, <b>uma linha por paciente</b>: quem aparece em mais de uma origem é reunido pelo código do paciente. Prioridade: score de risco (DIH &ge;15d +3 &middot; 8&ndash;14d +2 &middot; 4&ndash;7d +1 &middot; emergência +2 &middot; idade &gt;50 +2 &middot; CID de risco), depois egressos do PS sem agendamento futuro. Exclusões automáticas na importação: óbito (quando o arquivo trouxer o motivo da alta), berçário e day clinic (e, quando houver CID: Z38 recém-nascido saudável e O80 parto).</div>
   <div class="bar">
-    <input id="q3" placeholder="Buscar paciente, unidade ou origem...">
+    <input id="q3" placeholder="Buscar paciente, código, unidade, especialidade ou convênio...">
     <span class="chip on" data-t3="ALL">Todos</span>
     <span class="chip" data-t3="ALTO">Alto</span>
     <span class="chip" data-t3="MEDIO">Médio</span>
     <span class="chip" data-t3="BAIXO">Baixo</span>
+    <span class="chip" data-t3="PSSEM">PS sem agendamento</span>
+    <span class="chip" data-t3="INT30">Internado 30d</span>
     <span class="chip meus" data-meus3="1">Meus pacientes</span>
   </div>
   <div class="bar">
@@ -143,52 +146,20 @@
     <label class="sub">Idade</label>
     <input type="number" id="f-idmin" placeholder="mín" min="0" max="120" style="width:80px;flex:none">
     <input type="number" id="f-idmax" placeholder="máx" min="0" max="120" style="width:80px;flex:none">
-    <label class="sub">Alta de</label>
+    <label class="sub">Alta/fechamento de</label>
     <input type="date" id="f-dtini" style="flex:none">
     <label class="sub">até</label>
     <input type="date" id="f-dtfim" style="flex:none">
-    <button class="btn" id="btn-limpar-altas">Limpar filtros</button>
+    <button class="btn" id="btn-limpar-ab">Limpar filtros</button>
   </div>
-  <div class="distbar admin-only" id="distbar-altas" style="display:none">
-    <label class="sel-all"><input type="checkbox" id="sel-all-altas"> Selecionar todos os filtrados</label>
-    <span class="sub" id="sel-info-altas">0 selecionados</span>
-    <button class="btn pri" id="btn-dist-altas">&#9878; Distribuir selecionados entre os navegadores</button>
+  <div class="distbar admin-only" id="distbar-ab" style="display:none">
+    <label class="sel-all"><input type="checkbox" id="sel-all-ab"> Selecionar todos os filtrados</label>
+    <span class="sub" id="sel-info-ab">0 selecionados</span>
+    <button class="btn pri" id="btn-dist-ab">&#9878; Distribuir selecionados entre os navegadores</button>
   </div>
-  <div style="overflow-x:auto"><table id="tb3"><thead><tr>
-    <th class="admin-only chk-col"></th><th>Score</th><th>Origem do score</th><th>Código</th><th>Atend.</th><th>Paciente</th><th>Idade</th><th>Sexo</th><th>DIH</th><th>Operadora</th><th>Origem</th><th>Unidade da alta</th><th>Data da alta</th><th>Navegador</th><th>Orientação</th><th>Ação</th>
-  </tr></thead><tbody id="bd3"></tbody></table></div>
-</div>
-
-<!-- ============ ALTAS PS ============ -->
-<div class="panel" id="p-ps">
-  <div class="exp" style="align-items:center">
-    <button class="btn pri" onclick="document.getElementById('file-ps').click()">&#128194; Carregar egressos do PS (export 6906 .xls)</button>
-    <input type="file" id="file-ps" accept=".xls,.xlsx" style="display:none">
-    <span class="sub" id="ps-info"></span>
-  </div>
-  <div class="kpis">
-    <div class="kpi"><div class="n" id="ps-tot">0</div><div class="l">Egressos na base</div></div>
-    <div class="kpi alto"><div class="n" id="ps-sem">0</div><div class="l">Sem agendamento</div><div class="s">fila de trabalho</div></div>
-    <div class="kpi ok"><div class="n" id="ps-com">0</div><div class="l">Com agendamento futuro</div></div>
-    <div class="kpi ns"><div class="n" id="ps-int30">0</div><div class="l">Internado em 30 dias</div><div class="s">readmissão</div></div>
-  </div>
-  <div class="note"><b>Egressos do PS (relatório 6906).</b> Pacientes que saíram do pronto-socorro com indicação de acompanhamento ambulatorial. A fila prioritária são os <b>sem agendamento futuro</b> — a navegação fecha essa lacuna marcando o retorno na especialidade recomendada. "Internado 30 dias" é o indicador de readmissão desta população. Esta fila é separada do funil de internação do Dashboard.</div>
-  <div class="bar">
-    <input id="q4" placeholder="Buscar paciente, especialidade, convênio ou avaliador...">
-    <span class="chip on" data-t4="ALL">Todos</span>
-    <span class="chip" data-t4="SEM">Sem agendamento</span>
-    <span class="chip" data-t4="COM">Com agendamento</span>
-    <span class="chip" data-t4="INT">Internado 30d</span>
-    <span class="chip meus" data-meus4="1">Meus pacientes</span>
-  </div>
-  <div class="distbar admin-only" id="distbar-ps" style="display:none">
-    <label class="sel-all"><input type="checkbox" id="sel-all-ps"> Selecionar todos os filtrados</label>
-    <span class="sub" id="sel-info-ps">0 selecionados</span>
-    <button class="btn pri" id="btn-dist-ps">&#9878; Distribuir selecionados entre os navegadores</button>
-  </div>
-  <div style="overflow-x:auto"><table id="tb4"><thead><tr>
-    <th class="admin-only chk-col"></th><th>Código</th><th>Atend.</th><th>Paciente</th><th>Convênio</th><th>Especialidade</th><th>Agend. futuro</th><th>Retorno (dias)</th><th>Data fechamento</th><th>Méd. assistente / Encaminhamento</th><th>Internado 30d</th><th>Avaliador</th><th>Navegador</th><th>Ação</th>
-  </tr></thead><tbody id="bd4"></tbody></table></div>
+  <div style="overflow-x:auto"><table id="tb-ab"><thead><tr>
+    <th class="admin-only chk-col"></th><th>Score</th><th>Origem</th><th>Código</th><th>Atend.</th><th>Paciente</th><th>Idade</th><th>Sexo</th><th>DIH</th><th>Operadora</th><th>Unidade / Especialidade</th><th>Data</th><th>Navegador</th><th>Orientação</th><th>Ação</th>
+  </tr></thead><tbody id="bd-ab"></tbody></table></div>
 </div>
 
 <!-- ============ ACOMPANHAMENTO ============ -->
