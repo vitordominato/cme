@@ -1,6 +1,6 @@
 // Parsers dos exports do SoulMV (lidos no navegador via SheetJS/XLSX global):
 //  - Censo de internação (Gerenciamento de Unidade de Internação)
-//  - Altas hospitalares (Base Analítica ou export 7101 legado)
+//  - Altas hospitalares (Base Analítica, R_ALTA_MED_HOSP do MV ou export 7101 legado)
 //  - Egressos do PS (relatório 6906)
 
 const DAY = 86400000;
@@ -133,6 +133,46 @@ function parseAltasBaseAnalitica(rows, h) {
   return { items, excl };
 }
 
+// Formato MV "R_ALTA_MED_HOSP" (JasperReports): não há linha de cabeçalho —
+// cada alta é um bloco de linhas precedido por um rótulo "Unidade de Internação:".
+// Posições fixas do layout: linha principal 2=Atend 3=Cód.Paciente 4=Paciente
+// 9=Médico 11=Dt.Internação 18=Dt.Alta Médica · linha+2: 11=Convênio 14=Motivo
+// · linha+4: 9=Origem.
+function parseAltasMV(rows) {
+  const at = (r, c) => (rows[r] && rows[r][c] != null) ? rows[r][c] : '';
+  const items = [], seen = new Set();
+  let excl = 0, unidade = '';
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const iLb = row.findIndex(v => typeof v === 'string' && v.includes('Unidade de Interna'));
+    if (iLb >= 0) {
+      // nome da unidade = última célula preenchida da linha do rótulo
+      for (let c = row.length - 1; c > iLb; c--) {
+        const s = clean(row[c]);
+        if (s && s !== '-') { unidade = s; break; }
+      }
+      continue;
+    }
+    const atend = stripId(at(r, 2));
+    const pac = clean(at(r, 4));
+    if (!/^\d{6,}$/.test(atend) || !pac || seen.has(atend)) continue;
+    seen.add(atend);
+    const origem = clean(at(r + 4, 9));
+    const uUnid = unidade.toUpperCase(), uOrig = origem.toUpperCase();
+    if (uOrig.includes('DAY C') || uUnid.includes('DAY C') || uUnid.includes('BERCARIO')) { excl++; continue; }
+    const dAdm = parseDateAny(at(r, 11));
+    const dAlta = parseDateAny(at(r, 18));
+    const dih = (dAdm && dAlta) ? Math.round((dAlta - dAdm) / DAY) : null;
+    items.push({
+      atend, codpac: stripId(at(r, 3)), pac, anos: null, idadeStr: '', sexo: '',
+      convenio: clean(at(r + 2, 11)), cid: '', dih, origemAdm: origem, unidade,
+      motivo: clean(at(r + 2, 14)), med: clean(at(r, 9)),
+      alta: toBR(dAlta), altaISO: toISO(dAlta),
+    });
+  }
+  return { items, excl };
+}
+
 // Formato legado 7101 (cabeçalho Atend + Paciente).
 function parseAltas7101(rows, h) {
   const col = makeCol(rows[h]);
@@ -171,9 +211,11 @@ export function parseAltas(wb) {
   const rows = sheetMatrix(wb);
   const hNova = findHeader(rows, v => v.some(x => x.toUpperCase().includes('CD_ATENDIMENTO')));
   if (hNova >= 0) return parseAltasBaseAnalitica(rows, hNova);
+  const hMV = findHeader(rows, v => v.some(x => x.includes('Unidade de Interna')));
+  if (hMV >= 0) return parseAltasMV(rows);
   const h7101 = findHeader(rows, v => v.some(x => x.includes('Atend')) && v.some(x => x.includes('Paciente')));
   if (h7101 >= 0) return parseAltas7101(rows, h7101);
-  throw new Error('Formato de arquivo de altas não reconhecido (esperado Base Analítica ou export 7101).');
+  throw new Error('Formato de arquivo de altas não reconhecido (esperado Base Analítica, R_ALTA_MED_HOSP do MV ou export 7101).');
 }
 
 // ---------------------------------------------------------------- PS 6906

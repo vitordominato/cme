@@ -12,7 +12,7 @@ App web multiusuário para a navegação de pacientes pós-alta (pronto-socorro 
 
 ## Funcionalidades
 
-- **Altas do Dia** — importa o arquivo de altas hospitalares (Base Analítica ou export 7101) e o censo SoulMV; cruza alta × censo para score completo, ou aplica o score parcial (DIH, emergência, CID de risco, idade). Exclusões automáticas: berçário, day clinic, Z38, O80.
+- **Altas do Dia** — importa o arquivo de altas hospitalares (Base Analítica, relatório R_ALTA_MED_HOSP do MV ou export 7101) e o censo SoulMV; cruza alta × censo para score completo, ou aplica o score parcial (DIH, emergência, CID de risco, idade). Exclusões automáticas: berçário, day clinic, Z38, O80.
 - **Altas PS** — importa o relatório 6906 (egressos do PS); fila prioritária = sem agendamento futuro.
 - **Distribuição** — o administrador seleciona pacientes (checkbox) e clica em "Distribuir selecionados entre os navegadores": divisão igualitária, ordenada por score (o risco também é distribuído por igual), começando pelo navegador com menor fila ativa.
 - **Registro de contato** — modal com o fluxo Contato → Agendado → Motivo → Agenda; histórico completo por paciente com autor e data.
