@@ -31,9 +31,9 @@ const state = {
   uid: null, nome: '', role: null,
   users: [],                 // somente admin recebe
   pacientes: new Map(),      // atend -> doc data
-  selAltas: new Set(), selPS: new Set(),
+  selAb: new Set(),
   f: { q3: '', t3: 'ALL', meus3: false, conv: '', idmin: '', idmax: '', dtini: '', dtfim: '',
-       q4: '', t4: 'ALL', meus4: false, q2: '', t2: 'ALL', meus2: false, seg: 'conv' },
+       q2: '', t2: 'ALL', meus2: false, seg: 'conv' },
   modalAtend: null,
   unsubs: [],
 };
@@ -123,7 +123,7 @@ function enterApp() {
     ch.style.display = state.role === 'navegador' ? '' : 'none';
     if (state.role === 'navegador') ch.classList.add('on');
   });
-  state.f.meus2 = state.f.meus3 = state.f.meus4 = (state.role === 'navegador');
+  state.f.meus2 = state.f.meus3 = (state.role === 'navegador');
   openTab(first.dataset.p);
 
   // assinaturas em tempo real
@@ -153,7 +153,7 @@ function openTab(p) {
 }
 
 function renderAll() {
-  renderDash(); renderAltas(); renderPS(); renderControle();
+  renderDash(); renderAbordar(); renderControle();
 }
 
 // ================================================================ DASHBOARD
@@ -262,25 +262,70 @@ document.querySelectorAll('[data-seg]').forEach(ch => ch.onclick = () => {
   ch.classList.add('on'); state.f.seg = ch.dataset.seg; renderDash();
 });
 
-// ================================================================ ALTAS
-function altasList() {
+// ================================================================ PACIENTES A ABORDAR
+// Fila única: altas de internação + egressos do PS, uma linha por paciente.
+// Registros da mesma pessoa são agrupados pelo código do paciente; sem código,
+// o próprio atendimento é a chave (não há como cruzar).
+function isoFromBR(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(String(s || ''));
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+}
+
+function abordarGrupos() {
+  const docs = all().filter(d => d.origens && (d.origens.alta || d.origens.ps));
+  const g = new Map();
+  docs.forEach(d => {
+    const k = d.codpac ? 'p' + d.codpac : 'a' + d.atend;
+    if (!g.has(k)) g.set(k, []);
+    g.get(k).push(d);
+  });
+  const dataDe = d => d.altaISO || isoFromBR(d.ps && d.ps.fech) || '';
+  return [...g.values()].map(grupo => {
+    grupo.sort((a, b) => dataDe(b).localeCompare(dataDe(a)));
+    const altas = grupo.filter(d => d.origens.alta);
+    const pss = grupo.filter(d => d.origens.ps);
+    const prim = altas[0] || pss[0];   // principal: alta de internação (tem score); senão o PS mais recente
+    const ps = (pss[0] && pss[0].ps) || null;
+    const dono = grupo.find(d => d.assignedTo);
+    return {
+      prim, grupo, ps,
+      temAlta: altas.length > 0, temPS: pss.length > 0,
+      psSemAg: pss.length > 0 && !(ps && ps.agfut),
+      dataISO: dataDe(prim),
+      assignedTo: dono ? dono.assignedTo : null,
+      assignedToName: dono ? (dono.assignedToName || '') : '',
+    };
+  });
+}
+
+function abordarList() {
   const f = state.f;
-  return all().filter(d => d.origens && d.origens.alta).filter(d => {
-    if (f.t3 !== 'ALL' && d.tier !== f.t3) return false;
-    if (f.meus3 && d.assignedTo !== state.uid) return false;
+  return abordarGrupos().filter(e => {
+    const d = e.prim;
+    if ((f.t3 === 'ALTO' || f.t3 === 'MEDIO' || f.t3 === 'BAIXO') && d.tier !== f.t3) return false;
+    if (f.t3 === 'PSSEM' && !e.psSemAg) return false;
+    if (f.t3 === 'INT30' && !(e.ps && e.ps.int30)) return false;
+    if (f.meus3 && !e.grupo.some(x => x.assignedTo === state.uid)) return false;
     if (f.conv && (d.convenio || '') !== f.conv) return false;
     const anos = d.anos != null ? d.anos : d.idade;
     if (f.idmin !== '' && (anos == null || anos < +f.idmin)) return false;
     if (f.idmax !== '' && (anos == null || anos > +f.idmax)) return false;
-    if (f.dtini && (d.altaISO || '') < f.dtini) return false;
-    if (f.dtfim && (d.altaISO || '') > f.dtfim) return false;
+    if (f.dtini && (e.dataISO || '') < f.dtini) return false;
+    if (f.dtfim && (e.dataISO || '') > f.dtfim) return false;
     if (f.q3) {
       const q = f.q3.toLowerCase();
-      const blob = [d.pac, d.unidade, d.origemAdm, d.cid, d.atend].join(' ').toLowerCase();
+      const blob = e.grupo.map(x => [x.pac, x.unidade, x.origemAdm, x.cid, x.atend, x.codpac,
+        x.convenio, x.ps && x.ps.esp, x.ps && x.ps.aval].join(' ')).join(' ').toLowerCase();
       if (!blob.includes(q)) return false;
     }
     return true;
-  }).sort((a, b) => (b.score || 0) - (a.score || 0));
+  }).sort((a, b) => {
+    const sa = a.prim.score != null ? a.prim.score : -1;
+    const sb = b.prim.score != null ? b.prim.score : -1;
+    if (sb !== sa) return sb - sa;                          // maior risco primeiro
+    if (a.psSemAg !== b.psSemAg) return a.psSemAg ? -1 : 1; // PS sem agendamento antes
+    return String(b.dataISO).localeCompare(String(a.dataISO));
+  });
 }
 
 function navTag(d) {
@@ -289,98 +334,50 @@ function navTag(d) {
     : '<span class="nav-tag none">—</span>';
 }
 
-function renderAltas() {
-  const altas = all().filter(d => d.origens && d.origens.alta);
-  $('al-tot').textContent = altas.length;
-  $('al-alto').textContent = altas.filter(d => d.tier === 'ALTO').length;
-  $('al-medio').textContent = altas.filter(d => d.tier === 'MEDIO').length;
-  $('al-cruz').textContent = altas.filter(d => d.fonte === 'completo').length;
-  $('al-atrib').textContent = altas.filter(d => d.assignedTo).length;
+function renderAbordar() {
+  const grupos = abordarGrupos();
+  $('ab-tot').textContent = grupos.length;
+  $('ab-alto').textContent = grupos.filter(e => e.prim.tier === 'ALTO').length;
+  $('ab-medio').textContent = grupos.filter(e => e.prim.tier === 'MEDIO').length;
+  $('ab-pssem').textContent = grupos.filter(e => e.psSemAg).length;
+  $('ab-atrib').textContent = grupos.filter(e => e.assignedTo).length;
 
   // popular select de operadoras
-  const convs = [...new Set(altas.map(d => d.convenio).filter(Boolean))].sort();
+  const convs = [...new Set(grupos.map(e => e.prim.convenio).filter(Boolean))].sort();
   const sel = $('f-conv'), cur = sel.value;
   sel.innerHTML = '<option value="">Operadora: todas</option>' + convs.map(c => `<option${c === cur ? ' selected' : ''}>${esc(c)}</option>`).join('');
 
-  const list = altasList();
+  const list = abordarList();
   const isAdmin = state.role === 'admin';
-  $('distbar-altas').style.display = isAdmin ? 'flex' : 'none';
-  $('bd3').innerHTML = list.map(d => {
+  $('distbar-ab').style.display = isAdmin ? 'flex' : 'none';
+  $('bd-ab').innerHTML = list.map(e => {
+    const d = e.prim, p = e.ps || {};
     const flags = (d.flags || []).map(fl => `<span class="fl${flagCrit(fl) ? ' crit' : ''}">${esc(fl)}</span>`).join('');
-    const chk = isAdmin ? `<td><input type="checkbox" data-sel3="${esc(d.atend)}"${state.selAltas.has(d.atend) ? ' checked' : ''}></td>` : '';
+    const chk = isAdmin ? `<td><input type="checkbox" data-selab="${esc(d.atend)}"${state.selAb.has(d.atend) ? ' checked' : ''}></td>` : '';
+    const orig = (e.temAlta ? '<span class="orig int">Internação</span>' : '') + (e.temPS ? '<span class="orig ps">PS</span>' : '');
+    const psSub = e.temPS
+      ? `<div class="sub">PS: ${esc(p.esp || '—')} · ${p.agfut ? 'com agendamento futuro' : '<b>SEM agendamento</b>'}${p.retorno != null ? ' · retorno ' + p.retorno + 'd' : ''}${p.int30 ? ' · <b>internado 30d</b>' : ''}${p.aval ? ' · aval. ' + esc(p.aval) : ''}</div>`
+      : '';
+    const medSub = d.med ? `<div class="sub">${esc(d.med)}</div>` : (p.medEnc ? `<div class="sub">${esc(p.medEnc)}</div>` : '');
     return `<tr>${chk}
-      <td><span class="score">${d.score ?? '—'}</span><br><span class="tier ${d.tier}">${d.tier || ''}</span></td>
-      <td><span class="sub">${d.fonte === 'completo' ? 'censo · completo' : 'parcial'}</span></td>
+      <td><span class="score">${d.score ?? '—'}</span>${d.tier && d.tier !== '—' ? `<br><span class="tier ${d.tier}">${d.tier}</span>` : ''}</td>
+      <td>${orig}</td>
+      <td>${esc(d.codpac || (p.codpac || '—'))}</td>
       <td>${esc(d.atend)}</td>
-      <td><span class="pac">${esc(d.pac)}</span>${d.cid ? `<div class="sub">CID ${esc(d.cid)}</div>` : ''}${d.med ? `<div class="sub">${esc(d.med)}</div>` : ''}<div class="flags">${flags}</div>${d.alerta_noshow ? '<span class="ns-badge">RISCO NO-SHOW</span>' : ''}</td>
+      <td><span class="pac">${esc(d.pac)}</span>${d.cid ? `<div class="sub">CID ${esc(d.cid)}</div>` : ''}${medSub}${psSub}<div class="flags">${flags}</div>${d.alerta_noshow ? '<span class="ns-badge">RISCO NO-SHOW</span>' : ''}</td>
       <td>${d.anos != null ? d.anos : (d.idade != null ? d.idade : '—')}</td>
       <td>${esc(d.sexo || '—')}</td>
       <td>${d.dih != null && d.dih !== '' ? esc(d.dih) : '—'}</td>
       <td>${esc(d.convenio || '—')}</td>
-      <td>${esc(d.origemAdm || '—')}</td>
-      <td>${esc(d.unidade || '—')}</td>
-      <td>${esc(d.alta || '—')}</td>
-      <td>${navTag(d)}</td>
+      <td>${esc(d.unidade || p.esp || '—')}</td>
+      <td>${esc(d.alta || p.fech || '—')}</td>
+      <td>${navTag(e)}</td>
       <td class="orient">${esc(d.orientacao || '')}</td>
       <td><button class="btn" data-open="${esc(d.atend)}">Abrir</button></td>
     </tr>`;
-  }).join('') || `<tr><td colspan="15" class="sub" style="padding:18px">Nenhuma alta na base — carregue um arquivo de altas acima.</td></tr>`;
-  $('sel-info-altas').textContent = state.selAltas.size + ' selecionados';
-  wireRowEvents($('bd3'), 'sel3', state.selAltas, 'sel-info-altas');
-}
-
-// ================================================================ PS
-function psList() {
-  const f = state.f;
-  return all().filter(d => d.origens && d.origens.ps).filter(d => {
-    const p = d.ps || {};
-    if (f.t4 === 'SEM' && p.agfut) return false;
-    if (f.t4 === 'COM' && !p.agfut) return false;
-    if (f.t4 === 'INT' && !p.int30) return false;
-    if (f.meus4 && d.assignedTo !== state.uid) return false;
-    if (f.q4) {
-      const q = f.q4.toLowerCase();
-      const blob = [d.pac, p.esp, d.convenio, p.aval, d.atend].join(' ').toLowerCase();
-      if (!blob.includes(q)) return false;
-    }
-    return true;
-  }).sort((a, b) => {
-    const pa = a.ps || {}, pb = b.ps || {};
-    if (!!pa.agfut !== !!pb.agfut) return pa.agfut ? 1 : -1;
-    return String(pb.fechISO || pb.fech || '').localeCompare(String(pa.fechISO || pa.fech || ''));
-  });
-}
-
-function renderPS() {
-  const ps = all().filter(d => d.origens && d.origens.ps);
-  $('ps-tot').textContent = ps.length;
-  $('ps-sem').textContent = ps.filter(d => !(d.ps && d.ps.agfut)).length;
-  $('ps-com').textContent = ps.filter(d => d.ps && d.ps.agfut).length;
-  $('ps-int30').textContent = ps.filter(d => d.ps && d.ps.int30).length;
-
-  const list = psList();
-  const isAdmin = state.role === 'admin';
-  $('distbar-ps').style.display = isAdmin ? 'flex' : 'none';
-  $('bd4').innerHTML = list.map(d => {
-    const p = d.ps || {};
-    const chk = isAdmin ? `<td><input type="checkbox" data-sel4="${esc(d.atend)}"${state.selPS.has(d.atend) ? ' checked' : ''}></td>` : '';
-    return `<tr>${chk}
-      <td>${esc(d.atend)}<div class="sub">${esc(p.codpac || '')}</div></td>
-      <td><span class="pac">${esc(d.pac)}</span></td>
-      <td>${esc(d.convenio || '—')}</td>
-      <td>${esc(p.esp || '—')}</td>
-      <td>${p.agfut ? '<span class="status ok">SIM</span>' : '<span class="status pend">NÃO</span>'}</td>
-      <td style="text-align:center">${p.retorno != null ? p.retorno : '—'}</td>
-      <td>${esc(p.fech || '—')}</td>
-      <td class="orient">${esc(p.medEnc || '—')}</td>
-      <td>${p.int30 ? '<span class="status pend">SIM</span>' : '—'}</td>
-      <td>${esc(p.aval || '—')}</td>
-      <td>${navTag(d)}</td>
-      <td><button class="btn" data-open="${esc(d.atend)}">Abrir</button></td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="13" class="sub" style="padding:18px">Nenhum egresso do PS na base — carregue o export 6906 acima.</td></tr>`;
-  $('sel-info-ps').textContent = state.selPS.size + ' selecionados';
-  wireRowEvents($('bd4'), 'sel4', state.selPS, 'sel-info-ps');
+  }).join('') || `<tr><td colspan="15" class="sub" style="padding:18px">Nenhum paciente na base — carregue um arquivo de altas ou o export 6906 do PS acima.</td></tr>`;
+  $('sel-info-ab').textContent = state.selAb.size + ' selecionados';
+  wireRowEvents($('bd-ab'), 'selab', state.selAb, 'sel-info-ab');
 }
 
 function wireRowEvents(tbody, selAttr, selSet, infoId) {
@@ -443,10 +440,10 @@ async function reabrir(atend) {
 
 // ================================================================ FILTROS (wiring)
 const bind = (id, key, ev = 'input') => { $(id).addEventListener(ev, () => { state.f[key] = $(id).value; renderAll(); }); };
-bind('q3', 'q3'); bind('q4', 'q4'); bind('q2', 'q2');
+bind('q3', 'q3'); bind('q2', 'q2');
 bind('f-conv', 'conv', 'change'); bind('f-idmin', 'idmin'); bind('f-idmax', 'idmax');
 bind('f-dtini', 'dtini', 'change'); bind('f-dtfim', 'dtfim', 'change');
-$('btn-limpar-altas').onclick = () => {
+$('btn-limpar-ab').onclick = () => {
   ['q3', 'f-conv', 'f-idmin', 'f-idmax', 'f-dtini', 'f-dtfim'].forEach(id => { $(id).value = ''; });
   Object.assign(state.f, { q3: '', conv: '', idmin: '', idmax: '', dtini: '', dtfim: '' });
   renderAll();
@@ -457,27 +454,20 @@ function chipGroup(attr, key) {
     ch.classList.add('on'); state.f[key] = ch.dataset[attr]; renderAll();
   });
 }
-chipGroup('t3', 't3'); chipGroup('t4', 't4'); chipGroup('t2', 't2');
+chipGroup('t3', 't3'); chipGroup('t2', 't2');
 document.querySelectorAll('.chip.meus').forEach(ch => ch.onclick = () => {
   ch.classList.toggle('on');
   const on = ch.classList.contains('on');
   if ('meus3' in ch.dataset) state.f.meus3 = on;
-  if ('meus4' in ch.dataset) state.f.meus4 = on;
   if ('meus2' in ch.dataset) state.f.meus2 = on;
   renderAll();
 });
 
-$('sel-all-altas').onchange = e => {
-  const list = altasList();
-  if (e.target.checked) list.forEach(d => state.selAltas.add(d.atend));
-  else list.forEach(d => state.selAltas.delete(d.atend));
-  renderAltas();
-};
-$('sel-all-ps').onchange = e => {
-  const list = psList();
-  if (e.target.checked) list.forEach(d => state.selPS.add(d.atend));
-  else list.forEach(d => state.selPS.delete(d.atend));
-  renderPS();
+$('sel-all-ab').onchange = e => {
+  const list = abordarList();
+  if (e.target.checked) list.forEach(x => state.selAb.add(x.prim.atend));
+  else list.forEach(x => state.selAb.delete(x.prim.atend));
+  renderAbordar();
 };
 
 // ================================================================ DISTRIBUIÇÃO
@@ -505,10 +495,9 @@ async function distribuir(selSet) {
   }
   if (n) await batch.commit();
   selSet.clear();
-  $('sel-all-altas').checked = false; $('sel-all-ps').checked = false;
+  $('sel-all-ab').checked = false;
 }
-$('btn-dist-altas').onclick = () => distribuir(state.selAltas);
-$('btn-dist-ps').onclick = () => distribuir(state.selPS);
+$('btn-dist-ab').onclick = () => distribuir(state.selAb);
 
 // ================================================================ UPLOADS
 function readWB(file) {
@@ -548,7 +537,7 @@ $('file-censo').onchange = async e => {
       } };
     });
     await commitDocs(updates);
-    $('altas-info').textContent = `Censo atualizado: ${updates.length} pacientes (${nowBR()}).`;
+    $('imp-info').textContent = `Censo atualizado: ${updates.length} pacientes (${nowBR()}).`;
   } catch (err) { alert('Erro ao importar censo: ' + err.message); }
 };
 
@@ -557,31 +546,44 @@ $('file-altas').onchange = async e => {
   if (!file) return;
   try {
     const { items, excl } = parseAltas(await readWB(file));
+    // Fusão campo a campo com o registro existente: MV e BI se complementam —
+    // nunca sobrescrever dado preenchido com vazio, nem nome completo (MV) com
+    // o abreviado do BI ("J.I.D.M.M.").
+    const abrev = s => /\./.test(String(s || ''));
     const updates = items.map(item => {
-      const existing = state.pacientes.get(item.atend);
-      const base = {
-        pac: item.pac, anos: item.anos, idadeStr: item.idadeStr || '', sexo: item.sexo || '',
-        convenio: item.convenio || '', cid: item.cid || '', dih: item.dih,
-        origemAdm: item.origemAdm || '', unidade: item.unidade || '', motivo: item.motivo || '',
-        alta: item.alta || '', altaISO: item.altaISO || '',
-        origens: { alta: true }, altaEm: serverTimestamp(), atualizadoPor: state.nome,
+      const existing = state.pacientes.get(item.atend) || {};
+      const m = {
+        pac: existing.pac && abrev(item.pac) && !abrev(existing.pac) ? existing.pac : item.pac,
+        anos: item.anos != null ? item.anos : (existing.anos != null ? existing.anos : null),
+        idadeStr: item.idadeStr || existing.idadeStr || '',
+        sexo: item.sexo || existing.sexo || '',
+        convenio: item.convenio || existing.convenio || '',
+        cid: item.cid || existing.cid || '',
+        dih: item.dih != null ? item.dih : (existing.dih != null ? existing.dih : null),
+        origemAdm: item.origemAdm || existing.origemAdm || '',
+        unidade: item.unidade || existing.unidade || '',
+        motivo: item.motivo || existing.motivo || '',
+        alta: item.alta || existing.alta || '',
+        altaISO: item.altaISO || existing.altaISO || '',
       };
+      const base = { ...m, origens: { alta: true }, altaEm: serverTimestamp(), atualizadoPor: state.nome };
       if (item.med) base.med = item.med;
-      if (existing && existing.origens && existing.origens.censo && ['A', 'B', 'C'].includes(existing.trilha)) {
+      if (item.codpac) base.codpac = item.codpac;
+      if (existing.origens && existing.origens.censo && ['A', 'B', 'C'].includes(existing.trilha)) {
         // cruzou com o censo: mantém o score completo
         base.fonte = 'completo';
       } else {
-        const c = classificarAltaParcial(item);
+        const c = classificarAltaParcial(m);   // score sobre o registro já fundido
         Object.assign(base, {
           score: c.score, flags: c.flags, tier: c.tier, trilha: c.trilha, janela: c.janela,
-          paliativo: false, alerta_noshow: existing?.alerta_noshow || false,
+          paliativo: false, alerta_noshow: existing.alerta_noshow || false,
           orientacao: c.orientacao, fonte: 'parcial',
         });
       }
       return { atend: item.atend, data: base };
     });
     await commitDocs(updates);
-    $('altas-info').textContent = `Altas importadas: ${updates.length} elegíveis · ${excl} excluídas (berçário/day clinic/Z38/O80) — ${nowBR()}.`;
+    $('imp-info').textContent = `Altas importadas: ${updates.length} elegíveis · ${excl} excluídas (óbito/berçário/day clinic/Z38/O80) — ${nowBR()}.`;
   } catch (err) { alert('Erro ao importar altas: ' + err.message); }
 };
 
@@ -593,12 +595,13 @@ $('file-ps').onchange = async e => {
     const updates = items.map(item => {
       const existing = state.pacientes.get(item.atend);
       const data = {
-        pac: item.pac, convenio: item.convenio || '',
+        pac: item.pac, convenio: item.convenio || (existing && existing.convenio) || '',
         ps: { codpac: item.codpac || '', esp: item.esp || '', agfut: item.agfut,
               retorno: item.retorno, fech: item.fech || '', medEnc: item.medEnc || '',
               int30: item.int30, aval: item.aval || '' },
         origens: { ps: true }, psEm: serverTimestamp(), atualizadoPor: state.nome,
       };
+      if (item.codpac) data.codpac = item.codpac;
       if (!existing || !existing.trilha) {
         data.trilha = 'PS'; data.tier = '—';
         data.orientacao = 'Egresso do PS' + (item.agfut ? ' com agendamento futuro.' : ' SEM agendamento futuro: contatar e marcar retorno na especialidade recomendada' + (item.esp ? ' (' + item.esp + ')' : '') + (item.retorno != null ? ', retorno em ' + item.retorno + ' dias' : '') + '.');
@@ -606,7 +609,7 @@ $('file-ps').onchange = async e => {
       return { atend: item.atend, data };
     });
     await commitDocs(updates);
-    $('ps-info').textContent = `Egressos do PS importados: ${updates.length} — ${nowBR()}.`;
+    $('imp-info').textContent = `Egressos do PS importados: ${updates.length} — ${nowBR()}.`;
   } catch (err) { alert('Erro ao importar egressos do PS: ' + err.message); }
 };
 

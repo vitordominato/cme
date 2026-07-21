@@ -84,6 +84,9 @@ td input[type=checkbox],.sel-all input[type=checkbox]{width:16px;height:16px;acc
 .btn:disabled{opacity:.5;cursor:not-allowed;}
 .status{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;}
 .status.pend{background:#fdecea;color:var(--red);}.status.prog{background:#fef5e7;color:#b9770f;}.status.ok{background:#e6f4ec;color:var(--green);}
+.orig{display:inline-block;padding:2px 7px;border-radius:5px;font-size:9.5px;font-weight:700;margin-right:3px;text-transform:uppercase;letter-spacing:.3px;}
+.orig.int{background:#f0ebf7;color:var(--purple);border:1px solid #ddd0ea;}
+.orig.ps{background:#fef5e7;color:#b9770f;border:1px solid #f3e0bb;}
 .ag{font-size:11.5px;}
 .ag b{color:var(--navy);}
 .ag .res-ok{color:var(--green);font-weight:700;}
