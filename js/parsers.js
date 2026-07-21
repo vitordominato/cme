@@ -73,6 +73,26 @@ export function toBR(d) {
   return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
 }
 
+// ---------------------------------------------------------------- detecção
+// Identifica o tipo do export para roteamento automático na importação:
+// 'ps' (6906), 'altas' (Base Analítica/BI, R_ALTA_MED_HOSP do MV ou 7101),
+// 'censo' (Gerenciamento de Unidade de Internação) ou null.
+export function detectTipo(wb) {
+  const rows = sheetMatrix(wb);
+  if (findHeader(rows, v => v.some(x => x.includes('Paciente')) && v.some(x => x.includes('Agendamento'))) >= 0) return 'ps';
+  if (findHeader(rows, v => v.some(x => x.toUpperCase().includes('CD_ATENDIMENTO'))) >= 0) return 'altas';
+  if (findHeader(rows, v => v.some(x => x.includes('Unidade de Interna'))) >= 0) return 'altas';
+  const h = findHeader(rows, v => v.some(x => x.includes('Atend')) && v.some(x => x.includes('Paciente')));
+  if (h >= 0) {
+    const vals = rows[h].map(v => clean(v));
+    // censo tem colunas clínicas do internado; o 7101 tem a coluna de alta médica
+    if (vals.some(x => x.includes('NEWS') || x.includes('Fugulin') || x.includes('Prev. Alta') || x.includes('D.I.H.'))) return 'censo';
+    if (vals.some(x => x.includes('Alta Médica') || x.includes('Alta Medica'))) return 'altas';
+    return 'censo';
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- censo
 export function parseCenso(wb) {
   const rows = sheetMatrix(wb);
