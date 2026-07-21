@@ -113,12 +113,9 @@
 <!-- ============ CAPTAÇÃO ============ -->
 <div class="panel" id="p-abordar">
   <div class="exp" style="align-items:center">
-    <button class="btn pri" onclick="document.getElementById('file-altas').click()">&#128194; Carregar altas hospitalares (MV / BI / 7101)</button>
-    <input type="file" id="file-altas" accept=".xls,.xlsx" style="display:none">
-    <button class="btn pri" onclick="document.getElementById('file-ps').click()">&#128194; Carregar egressos do PS (export 6906)</button>
-    <input type="file" id="file-ps" accept=".xls,.xlsx" style="display:none">
-    <button class="btn" onclick="document.getElementById('file-censo').click()">&#128194; Atualizar censo (export SoulMV)</button>
-    <input type="file" id="file-censo" accept=".xls,.xlsx" style="display:none">
+    <button class="btn pri" onclick="document.getElementById('file-imp').click()">&#128194; Importar arquivos — altas (MV/BI/7101), PS 6906 ou censo</button>
+    <input type="file" id="file-imp" accept=".xls,.xlsx" multiple style="display:none">
+    <span class="sub">O tipo de cada arquivo é reconhecido automaticamente; pode selecionar vários de uma vez.</span>
     <span class="sub" id="imp-info"></span>
   </div>
   <div class="kpis">

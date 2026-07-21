@@ -15,7 +15,7 @@ import {
 import { firebaseConfig } from './firebase-config.js';
 import { COBRANCA } from './cobranca-data.js';
 import { classificarCenso, classificarAltaParcial, flagCrit, faixaEtaria, FAIXAS } from './scoring.js';
-import { parseCenso, parseAltas, parsePS } from './parsers.js';
+import { parseCenso, parseAltas, parsePS, detectTipo } from './parsers.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -519,98 +519,107 @@ async function commitDocs(updates) {
   if (n) await batch.commit();
 }
 
-$('file-censo').onchange = async e => {
-  const file = e.target.files[0]; e.target.value = '';
-  if (!file) return;
-  try {
-    const rows = parseCenso(await readWB(file));
-    const updates = rows.map(x => {
-      const c = classificarCenso(x);
-      return { atend: c.atend, data: {
-        pac: c.pac, dt: c.dt, leito: c.leito, dn: c.dn, med: c.med || '', dih: c.dih,
-        news: c.news, risco: c.risco, charlson: c.charlson, fugulin: c.fugulin,
-        dieta: c.dieta, ccih: c.ccih, mrc: c.mrc, cp: c.cp, nutri: c.nutri, prev_alta: c.prev_alta,
-        idade: c.idade, score: c.score, flags: c.flags, tier: c.tier, trilha: c.trilha,
-        janela: c.janela, paliativo: c.paliativo, alerta_noshow: c.alerta_noshow,
-        orientacao: c.orientacao, fonte: 'completo',
-        origens: { censo: true }, censoEm: serverTimestamp(), atualizadoPor: state.nome,
-      } };
-    });
-    await commitDocs(updates);
-    $('imp-info').textContent = `Censo atualizado: ${updates.length} pacientes (${nowBR()}).`;
-  } catch (err) { alert('Erro ao importar censo: ' + err.message); }
-};
+// Importação com detecção automática do tipo de arquivo (censo, altas ou PS 6906).
+async function importarCenso(wb) {
+  const rows = parseCenso(wb);
+  const updates = rows.map(x => {
+    const c = classificarCenso(x);
+    return { atend: c.atend, data: {
+      pac: c.pac, dt: c.dt, leito: c.leito, dn: c.dn, med: c.med || '', dih: c.dih,
+      news: c.news, risco: c.risco, charlson: c.charlson, fugulin: c.fugulin,
+      dieta: c.dieta, ccih: c.ccih, mrc: c.mrc, cp: c.cp, nutri: c.nutri, prev_alta: c.prev_alta,
+      idade: c.idade, score: c.score, flags: c.flags, tier: c.tier, trilha: c.trilha,
+      janela: c.janela, paliativo: c.paliativo, alerta_noshow: c.alerta_noshow,
+      orientacao: c.orientacao, fonte: 'completo',
+      origens: { censo: true }, censoEm: serverTimestamp(), atualizadoPor: state.nome,
+    } };
+  });
+  await commitDocs(updates);
+  return `censo atualizado (${updates.length} pacientes)`;
+}
 
-$('file-altas').onchange = async e => {
-  const file = e.target.files[0]; e.target.value = '';
-  if (!file) return;
-  try {
-    const { items, excl } = parseAltas(await readWB(file));
-    // Fusão campo a campo com o registro existente: MV e BI se complementam —
-    // nunca sobrescrever dado preenchido com vazio, nem nome completo (MV) com
-    // o abreviado do BI ("J.I.D.M.M.").
-    const abrev = s => /\./.test(String(s || ''));
-    const updates = items.map(item => {
-      const existing = state.pacientes.get(item.atend) || {};
-      const m = {
-        pac: existing.pac && abrev(item.pac) && !abrev(existing.pac) ? existing.pac : item.pac,
-        anos: item.anos != null ? item.anos : (existing.anos != null ? existing.anos : null),
-        idadeStr: item.idadeStr || existing.idadeStr || '',
-        sexo: item.sexo || existing.sexo || '',
-        convenio: item.convenio || existing.convenio || '',
-        cid: item.cid || existing.cid || '',
-        dih: item.dih != null ? item.dih : (existing.dih != null ? existing.dih : null),
-        origemAdm: item.origemAdm || existing.origemAdm || '',
-        unidade: item.unidade || existing.unidade || '',
-        motivo: item.motivo || existing.motivo || '',
-        alta: item.alta || existing.alta || '',
-        altaISO: item.altaISO || existing.altaISO || '',
-      };
-      const base = { ...m, origens: { alta: true }, altaEm: serverTimestamp(), atualizadoPor: state.nome };
-      if (item.med) base.med = item.med;
-      if (item.codpac) base.codpac = item.codpac;
-      if (existing.origens && existing.origens.censo && ['A', 'B', 'C'].includes(existing.trilha)) {
-        // cruzou com o censo: mantém o score completo
-        base.fonte = 'completo';
-      } else {
-        const c = classificarAltaParcial(m);   // score sobre o registro já fundido
-        Object.assign(base, {
-          score: c.score, flags: c.flags, tier: c.tier, trilha: c.trilha, janela: c.janela,
-          paliativo: false, alerta_noshow: existing.alerta_noshow || false,
-          orientacao: c.orientacao, fonte: 'parcial',
-        });
-      }
-      return { atend: item.atend, data: base };
-    });
-    await commitDocs(updates);
-    $('imp-info').textContent = `Altas importadas: ${updates.length} elegíveis · ${excl} excluídas (óbito/berçário/day clinic/Z38/O80) — ${nowBR()}.`;
-  } catch (err) { alert('Erro ao importar altas: ' + err.message); }
-};
+async function importarAltas(wb) {
+  const { items, excl } = parseAltas(wb);
+  // Fusão campo a campo com o registro existente: MV e BI se complementam —
+  // nunca sobrescrever dado preenchido com vazio, nem nome completo (MV) com
+  // o abreviado do BI ("J.I.D.M.M.").
+  const abrev = s => /\./.test(String(s || ''));
+  const updates = items.map(item => {
+    const existing = state.pacientes.get(item.atend) || {};
+    const m = {
+      pac: existing.pac && abrev(item.pac) && !abrev(existing.pac) ? existing.pac : item.pac,
+      anos: item.anos != null ? item.anos : (existing.anos != null ? existing.anos : null),
+      idadeStr: item.idadeStr || existing.idadeStr || '',
+      sexo: item.sexo || existing.sexo || '',
+      convenio: item.convenio || existing.convenio || '',
+      cid: item.cid || existing.cid || '',
+      dih: item.dih != null ? item.dih : (existing.dih != null ? existing.dih : null),
+      origemAdm: item.origemAdm || existing.origemAdm || '',
+      unidade: item.unidade || existing.unidade || '',
+      motivo: item.motivo || existing.motivo || '',
+      alta: item.alta || existing.alta || '',
+      altaISO: item.altaISO || existing.altaISO || '',
+    };
+    const base = { ...m, origens: { alta: true }, altaEm: serverTimestamp(), atualizadoPor: state.nome };
+    if (item.med) base.med = item.med;
+    if (item.codpac) base.codpac = item.codpac;
+    if (existing.origens && existing.origens.censo && ['A', 'B', 'C'].includes(existing.trilha)) {
+      // cruzou com o censo: mantém o score completo
+      base.fonte = 'completo';
+    } else {
+      const c = classificarAltaParcial(m);   // score sobre o registro já fundido
+      Object.assign(base, {
+        score: c.score, flags: c.flags, tier: c.tier, trilha: c.trilha, janela: c.janela,
+        paliativo: false, alerta_noshow: existing.alerta_noshow || false,
+        orientacao: c.orientacao, fonte: 'parcial',
+      });
+    }
+    return { atend: item.atend, data: base };
+  });
+  await commitDocs(updates);
+  return `${updates.length} altas elegíveis · ${excl} excluídas (óbito/berçário/day clinic/Z38/O80)`;
+}
 
-$('file-ps').onchange = async e => {
-  const file = e.target.files[0]; e.target.value = '';
-  if (!file) return;
-  try {
-    const items = parsePS(await readWB(file));
-    const updates = items.map(item => {
-      const existing = state.pacientes.get(item.atend);
-      const data = {
-        pac: item.pac, convenio: item.convenio || (existing && existing.convenio) || '',
-        ps: { codpac: item.codpac || '', esp: item.esp || '', agfut: item.agfut,
-              retorno: item.retorno, fech: item.fech || '', medEnc: item.medEnc || '',
-              int30: item.int30, aval: item.aval || '' },
-        origens: { ps: true }, psEm: serverTimestamp(), atualizadoPor: state.nome,
-      };
-      if (item.codpac) data.codpac = item.codpac;
-      if (!existing || !existing.trilha) {
-        data.trilha = 'PS'; data.tier = '—';
-        data.orientacao = 'Egresso do PS' + (item.agfut ? ' com agendamento futuro.' : ' SEM agendamento futuro: contatar e marcar retorno na especialidade recomendada' + (item.esp ? ' (' + item.esp + ')' : '') + (item.retorno != null ? ', retorno em ' + item.retorno + ' dias' : '') + '.');
-      }
-      return { atend: item.atend, data };
-    });
-    await commitDocs(updates);
-    $('imp-info').textContent = `Egressos do PS importados: ${updates.length} — ${nowBR()}.`;
-  } catch (err) { alert('Erro ao importar egressos do PS: ' + err.message); }
+async function importarPS(wb) {
+  const items = parsePS(wb);
+  const updates = items.map(item => {
+    const existing = state.pacientes.get(item.atend);
+    const data = {
+      pac: item.pac, convenio: item.convenio || (existing && existing.convenio) || '',
+      ps: { codpac: item.codpac || '', esp: item.esp || '', agfut: item.agfut,
+            retorno: item.retorno, fech: item.fech || '', medEnc: item.medEnc || '',
+            int30: item.int30, aval: item.aval || '' },
+      origens: { ps: true }, psEm: serverTimestamp(), atualizadoPor: state.nome,
+    };
+    if (item.codpac) data.codpac = item.codpac;
+    if (!existing || !existing.trilha) {
+      data.trilha = 'PS'; data.tier = '—';
+      data.orientacao = 'Egresso do PS' + (item.agfut ? ' com agendamento futuro.' : ' SEM agendamento futuro: contatar e marcar retorno na especialidade recomendada' + (item.esp ? ' (' + item.esp + ')' : '') + (item.retorno != null ? ', retorno em ' + item.retorno + ' dias' : '') + '.');
+    }
+    return { atend: item.atend, data };
+  });
+  await commitDocs(updates);
+  return `${updates.length} egressos do PS importados`;
+}
+
+$('file-imp').onchange = async e => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (!files.length) return;
+  const msgs = [];
+  for (const file of files) {
+    try {
+      const wb = await readWB(file);
+      const tipo = detectTipo(wb);
+      if (tipo === 'censo') msgs.push(`${file.name}: ${await importarCenso(wb)}`);
+      else if (tipo === 'altas') msgs.push(`${file.name}: ${await importarAltas(wb)}`);
+      else if (tipo === 'ps') msgs.push(`${file.name}: ${await importarPS(wb)}`);
+      else throw new Error('formato não reconhecido — esperado altas (MV/BI/7101), egressos do PS (6906) ou censo SoulMV');
+    } catch (err) {
+      msgs.push(`${file.name}: ERRO — ${err.message}`);
+      alert(`Erro ao importar ${file.name}: ${err.message}`);
+    }
+  }
+  $('imp-info').textContent = msgs.join(' · ') + ' — ' + nowBR() + '.';
 };
 
 // ================================================================ MODAL
